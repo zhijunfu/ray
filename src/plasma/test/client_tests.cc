@@ -12,7 +12,7 @@
 using namespace plasma;
 
 SUITE(plasma_client_tests);
-
+#if 0
 TEST plasma_status_tests(void) {
   PlasmaClient client1;
   ARROW_CHECK_OK(client1.Connect("/tmp/store1", "/tmp/manager1",
@@ -318,14 +318,77 @@ TEST plasma_get_multiple_tests(void) {
 
   PASS();
 }
+#endif
+TEST plasma_queue_push_and_get_test(void) {
+  PlasmaClient client1, client2;
+  ARROW_CHECK_OK(client1.Connect("/tmp/store1", "/tmp/manager1",
+                                 plasma::kPlasmaDefaultReleaseDelay));
+  ARROW_CHECK_OK(client2.Connect("/tmp/store2", "/tmp/manager2",
+                                 plasma::kPlasmaDefaultReleaseDelay));
+
+  ObjectID object_id = ObjectID::from_random();
+  printf("queue object id: %s\n", object_id.binary().c_str());
+  std::vector<ObjectBuffer> object_buffers;
+
+  printf("this is a test\n\n");
+  // Test for object non-existence on the first client.
+  bool has_object;
+  ARROW_CHECK_OK(client2.Contains(object_id, &has_object));
+  ASSERT_FALSE(has_object);
+
+  // Test for the object being in local Plasma store.
+  // First create and seal object on the second client.
+  int64_t queue_size = 10 * 1024;
+  std::shared_ptr<Buffer> data;
+  ARROW_CHECK_OK(client1.CreateQueue(object_id, queue_size, &data));
+  // ARROW_CHECK_OK(client1.Seal(object_id));
+  // Test that the first client can get the object.
+  int notify_fd;
+  sleep(2);
+  ARROW_CHECK_OK(client2.GetQueue(object_id, -1, &notify_fd));
+  ARROW_CHECK_OK(client2.Contains(object_id, &has_object));
+  ASSERT(has_object);
+
+  sleep(5);
+  uint8_t item1[] = { 1, 2, 3, 4, 5 };
+  int64_t item1_size = sizeof(item1);
+  ARROW_CHECK_OK(client1.PushQueueItem(object_id, item1, item1_size));
+
+  uint8_t item2[] = { 6, 7, 8, 9 };
+  int64_t item2_size = sizeof(item2);
+  ARROW_CHECK_OK(client1.PushQueueItem(object_id, item2, item2_size));
+
+  uint8_t* buff = nullptr;
+  uint32_t buff_size = 0;
+  uint64_t seq_id = -1;
+
+  ARROW_CHECK_OK(client2.GetQueueItem(object_id, buff, buff_size, seq_id));
+  ASSERT(seq_id == 1);
+  ASSERT(buff_size == item1_size);
+  for (auto i = 0; i < buff_size; i++) {
+    ASSERT(buff[i] == item1[i]);
+  }
+   
+  ARROW_CHECK_OK(client2.GetQueueItem(object_id, buff, buff_size, seq_id));
+  ASSERT(seq_id == 2);
+  ASSERT(buff_size == item2_size);
+  for (auto i = 0; i < buff_size; i++) {
+    ASSERT(buff[i] == item2[i]);
+  }
+
+  PASS();
+}
 
 SUITE(plasma_client_tests) {
+  /*
   RUN_TEST(plasma_status_tests);
   RUN_TEST(plasma_fetch_tests);
   RUN_TEST(plasma_nonblocking_get_tests);
   RUN_TEST(plasma_wait_for_objects_tests);
   RUN_TEST(plasma_get_tests);
   RUN_TEST(plasma_get_multiple_tests);
+  */
+  RUN_TEST(plasma_queue_push_and_get_test);
 }
 
 GREATEST_MAIN_DEFS();

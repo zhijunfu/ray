@@ -150,6 +150,7 @@ typedef struct {
    *  manager_vector in the retry handler, in case the current attempt fails to
    *  contact a manager. */
   int next_manager;
+  bool is_queue;
 } FetchRequest;
 
 /**
@@ -212,6 +213,7 @@ struct PlasmaManagerState {
    *  other plasma managers. These are used for writing data to
    *  other plasma stores. */
   std::unordered_map<std::string, ClientConnection *> manager_connections;
+  std::unordered_map<std::string, ClientConnection *> manager_connections_for_queue;
   DBHandle *db;
   /** The handle to the GCS (modern version of the above). */
   ray::gcs::AsyncGcsClient gcs_client;
@@ -248,6 +250,8 @@ struct PlasmaManagerState {
    *  then all objects being received from a remote manager will need to be
    *  removed if the connection to the remote manager fails. */
   std::unordered_set<ObjectID> receives_in_progress;
+
+  std::unordered_set<ObjectID> local_queues;
 };
 
 PlasmaManagerState *g_manager_state = NULL;
@@ -280,6 +284,8 @@ struct ClientConnection {
    * identifies the plasma manager that we're connected to. We will use the
    * string <address>:<port> as an identifier. */
   std::string ip_addr_port;
+
+  std::unordered_map<int, ObjectID> subscribed_queues;
 };
 
 /**
@@ -294,7 +300,8 @@ struct ClientConnection {
  */
 ClientConnection *ClientConnection_init(PlasmaManagerState *state,
                                         int client_sock,
-                                        std::string const &client_key);
+                                        std::string const &client_key,
+                                        bool is_queue = false);
 
 /**
  * Destroys a plasma client and its connection.
@@ -302,7 +309,7 @@ ClientConnection *ClientConnection_init(PlasmaManagerState *state,
  * @param client_conn The client's state.
  * @return Void.
  */
-void ClientConnection_free(ClientConnection *client_conn);
+void ClientConnection_free(ClientConnection *client_conn, bool is_queue = false);
 
 void ClientConnection_start_request(ClientConnection *client_conn) {
   client_conn->cursor = 0;
@@ -439,9 +446,11 @@ void update_object_wait_requests(PlasmaManagerState *manager_state,
 }
 
 FetchRequest *create_fetch_request(PlasmaManagerState *manager_state,
-                                   ObjectID object_id) {
+                                   ObjectID object_id, bool is_queue = false) {
   FetchRequest *fetch_req = new FetchRequest();
   fetch_req->object_id = object_id;
+  fetch_req->is_queue = is_queue;
+  fetch_req->next_manager = 0;
   return fetch_req;
 }
 
@@ -528,6 +537,13 @@ void PlasmaManagerState_free(PlasmaManagerState *state) {
     cc_it = next_it;
   }
 
+  cc_it = state->manager_connections_for_queue.begin();
+  while (cc_it != state->manager_connections_for_queue.end()) {
+    auto next_it = std::next(cc_it, 1);
+    ClientConnection_free(cc_it->second, true);
+    cc_it = next_it;
+  }
+
   /* We have to be careful here because remove_fetch_request modifies
    * state->fetch_requests in place. */
   auto it = state->fetch_requests.begin();
@@ -609,6 +625,11 @@ void send_queued_request(event_loop *loop,
   PlasmaRequestBuffer *buf = conn->transfer_queue.front();
   int err = 0;
   switch (buf->type) {
+  case MessageType::PlasmaQueueRemoteSubscribeRequest:
+    err = handle_sigpipe(
+        plasma::SendQueueRemoteSubscribeRequest(conn->fd, buf->object_id.to_plasma_id(),
+                                state->addr, state->port),
+        conn->fd);
   case MessageType::PlasmaDataRequest:
     err = handle_sigpipe(
         plasma::SendDataRequest(conn->fd, buf->object_id.to_plasma_id(),
@@ -761,20 +782,22 @@ void ignore_data_chunk(event_loop *loop,
 
 ClientConnection *get_manager_connection(PlasmaManagerState *state,
                                          const char *ip_addr,
-                                         int port) {
+                                         int port,
+                                         bool is_queue) {
   /* TODO(swang): Should probably check whether ip_addr and port belong to us.
    */
   std::string ip_addr_port = std::string(ip_addr) + ":" + std::to_string(port);
   ClientConnection *manager_conn;
-  auto cc_it = state->manager_connections.find(ip_addr_port);
-  if (cc_it == state->manager_connections.end()) {
+  auto& connections = is_queue ? state->manager_connections_for_queue : state->manager_connections;
+  auto cc_it = connections.find(ip_addr_port);
+  if (cc_it == connections.end()) {
     /* If we don't already have a connection to this manager, start one. */
     int fd = connect_inet_sock(ip_addr, port);
     if (fd < 0) {
       return NULL;
     }
 
-    manager_conn = ClientConnection_init(state, fd, ip_addr_port);
+    manager_conn = ClientConnection_init(state, fd, ip_addr_port, is_queue);
   } else {
     manager_conn = cc_it->second;
   }
@@ -919,6 +942,9 @@ void request_transfer_from(PlasmaManagerState *manager_state,
   RAY_CHECK(fetch_req->next_manager >= 0 &&
             static_cast<size_t>(fetch_req->next_manager) <
                 fetch_req->manager_vector.size());
+  if (fetch_req->is_queue) {
+    RAY_CHECK(fetch_req->next_manager == 0);
+  }
   char addr[16];
   int port;
   parse_ip_addr_port(fetch_req->manager_vector[fetch_req->next_manager].c_str(),
@@ -939,7 +965,8 @@ void request_transfer_from(PlasmaManagerState *manager_state,
     }
 
     PlasmaRequestBuffer *transfer_request = new PlasmaRequestBuffer();
-    transfer_request->type = MessageType::PlasmaDataRequest;
+    transfer_request->type = fetch_req->is_queue ? 
+      MessageType::PlasmaQueueRemoteSubscribeRequest : MessageType::PlasmaDataRequest;
     transfer_request->object_id = fetch_req->object_id;
 
     if (manager_conn->transfer_queue.size() == 0) {
@@ -952,9 +979,11 @@ void request_transfer_from(PlasmaManagerState *manager_state,
     manager_conn->transfer_queue.push_back(transfer_request);
   }
 
-  /* On the next attempt, try the next manager in manager_vector. */
-  fetch_req->next_manager += 1;
-  fetch_req->next_manager %= fetch_req->manager_vector.size();
+  if (!fetch_req->is_queue) {
+    /* On the next attempt, try the next manager in manager_vector. */
+    fetch_req->next_manager += 1;
+    fetch_req->next_manager %= fetch_req->manager_vector.size();
+  }
 }
 
 int fetch_timeout_handler(event_loop *loop, timer_id id, void *context) {
@@ -1069,6 +1098,38 @@ void fatal_table_callback(ObjectID id, void *user_context, void *user_data) {
   RAY_CHECK(0);
 }
 
+void send_queue_remote_subscribe_request(ObjectID object_id,
+       const std::vector<std::string> &manager_vector,
+       void *context) {
+  PlasmaManagerState *manager_state = (PlasmaManagerState *) context;
+
+  char addr[16];
+  int port;
+  parse_ip_addr_port(manager_vector[0].c_str(), addr, &port);
+
+  ClientConnection *manager_conn =
+      get_manager_connection(manager_state, addr, port);
+  if (manager_conn != NULL) {
+    /* Check that this manager isn't trying to request an object from itself.
+     * TODO(rkn): Later this should not be fatal. */
+    uint8_t temp_addr[4];
+    sscanf(addr, "%hhu.%hhu.%hhu.%hhu", &temp_addr[0], &temp_addr[1],
+           &temp_addr[2], &temp_addr[3]);
+    if (memcmp(temp_addr, manager_state->addr, 4) == 0 &&
+        port == manager_state->port) {
+      RAY_LOG(FATAL) << "This manager is attempting to request a transfer from "
+                     << "itself.";
+    }
+
+    // Here we need to provide our addr & port.
+    int err = handle_sigpipe(
+        plasma::SendQueueRemoteSubscribeRequest(manager_conn->fd, 
+               object_id.to_plasma_id(), manager_state->addr, manager_state->port),
+        manager_conn->fd);
+    RAY_CHECK(err == 0);
+  }
+}
+
 /* This callback is used by both fetch and wait. Therefore, it may have to
  * handle outstanding fetch and wait requests. */
 void object_table_subscribe_callback(ObjectID object_id,
@@ -1082,7 +1143,41 @@ void object_table_subscribe_callback(ObjectID object_id,
   auto it = manager_state->fetch_requests.find(object_id);
 
   if (it != manager_state->fetch_requests.end()) {
-    request_transfer(object_id, managers, context);
+    // TODO:
+    // If this is a queue info fetch, don't transfer data. Just create Plasma queue locally
+    // with the required size, and then subscribe to remote Plasma Manager. Upon receiving 
+    // this subscription message, the remote Plasma Manager would:
+    // 1. Subscribe its local plasma queue by using PlasmaClient Subscribe.
+    // 2. Add the returned fd to event loop with a callback, which would 
+    //    call GetNotification() to obtain a seq_id, and use GetQueueItem() to
+    //    get the item, and then send to the requiring Plasma Manager, using
+    //    the connection created in step 3. First send a message (new type),
+    //    and then followed by data.
+    // 3. Create a new connection to the requiring Plasma Manager, for continously
+    //    pushing data to it. This is separate from existin client connections.
+    if (it->second->is_queue) {
+      // Do this before CreateQueue() is called, which will seal the queue object
+      // and trigger process_add_object_notification(). This is to avoid same object_id
+      // with different objects added to GCS.
+
+      printf("object_table_subscribe_callback(): object id: %s\n", object_id.to_plasma_id().binary().c_str());
+      manager_state->local_queues.insert(object_id);
+      // Queue case: don't transfer data.
+      std::shared_ptr<Buffer> data;
+      plasma::Status s = manager_state->plasma_conn->CreateQueue(
+        object_id.to_plasma_id(), data_size, &data);
+      // TODO: we should handle the case where CreateQueue fails.
+      RAY_CHECK(s.ok());
+      
+      // Send queue subscribe message to remote manager.
+      // NOTE: fetch_req has been removed in process_add_object_notification(), so here
+      // we cannot use request_buffer().
+      send_queue_remote_subscribe_request(object_id, managers, context);
+    }
+    else {
+      // Normal case: transfer data.
+      request_transfer(object_id, managers, context);
+    }
   }
   /* Run the callback for wait requests. */
   update_object_wait_requests(manager_state, object_id,
@@ -1092,7 +1187,8 @@ void object_table_subscribe_callback(ObjectID object_id,
 
 void process_fetch_requests(ClientConnection *client_conn,
                             int num_object_ids,
-                            plasma::ObjectID object_ids[]) {
+                            plasma::ObjectID object_ids[],
+                            bool is_queue = false) {
   PlasmaManagerState *manager_state = client_conn->manager_state;
 
   int num_object_ids_to_request = 0;
@@ -1117,7 +1213,7 @@ void process_fetch_requests(ClientConnection *client_conn,
 
     /* Add an entry to the fetch requests data structure to indidate that the
      * object is being fetched. */
-    FetchRequest *entry = create_fetch_request(manager_state, obj_id);
+    FetchRequest *entry = create_fetch_request(manager_state, obj_id, is_queue);
     manager_state->fetch_requests[obj_id] = entry;
     /* Add this object ID to the list of object IDs to request notifications for
      * from the object table. */
@@ -1350,6 +1446,20 @@ void process_add_object_notification(PlasmaManagerState *state,
                                      int64_t data_size,
                                      int64_t metadata_size,
                                      unsigned char *digest) {
+  // TODO: this might need to be revisited.
+  if (state->local_queues.find(object_id) != state->local_queues.end()) {
+    // For local queues, don't add to GCS object table, otherwise there
+    // would be conflict with original queue object which has been added to GCS.
+
+    // XXX: should we do this?
+    auto it = state->fetch_requests.find(object_id);
+    if (it != state->fetch_requests.end()) {
+      remove_fetch_request(state, it->second);
+      /* TODO(rkn): We also really should unsubscribe from the object table. */
+    }
+    return;    
+  }
+                                          
   state->local_available_objects.insert(object_id);
   if (state->receives_in_progress.count(object_id) > 0) {
     // This object is now locally available, so remove it from the
@@ -1410,7 +1520,8 @@ void process_object_notification(event_loop *loop,
  * into two structs, one for workers and one for other plasma managers. */
 ClientConnection *ClientConnection_init(PlasmaManagerState *state,
                                         int client_sock,
-                                        std::string const &client_key) {
+                                        std::string const &client_key,
+                                        bool is_queue) {
   /* Create a new data connection context per client. */
   ClientConnection *conn = new ClientConnection();
   conn->manager_state = state;
@@ -1419,7 +1530,8 @@ ClientConnection *ClientConnection_init(PlasmaManagerState *state,
   conn->num_return_objects = 0;
 
   conn->ip_addr_port = client_key;
-  state->manager_connections[client_key] = conn;
+  auto& connections = is_queue ? state->manager_connections_for_queue : state->manager_connections;
+  connections[client_key] = conn;
   return conn;
 }
 
@@ -1438,9 +1550,10 @@ ClientConnection *ClientConnection_listen(event_loop *loop,
   return conn;
 }
 
-void ClientConnection_free(ClientConnection *client_conn) {
+void ClientConnection_free(ClientConnection *client_conn, bool is_queue) {
   PlasmaManagerState *state = client_conn->manager_state;
-  state->manager_connections.erase(client_conn->ip_addr_port);
+  auto& connections = is_queue ? state->manager_connections_for_queue : state->manager_connections;
+  connections.erase(client_conn->ip_addr_port);
 
   client_conn->pending_object_transfers.clear();
 
@@ -1465,6 +1578,122 @@ int get_client_sock(ClientConnection *conn) {
   return conn->fd;
 }
 
+void process_new_queue_item(event_loop *loop,
+                     int client_sock,
+                     void *context,
+                     int events) {
+  // This is the connection we use to push queue items.                     
+  ClientConnection *conn = (ClientConnection *) context;
+
+  ObjectID object_id = conn->subscribed_queues[client_sock];
+  uint8_t* data;
+  uint32_t data_size;
+  uint64_t seq_id;
+  ARROW_CHECK_OK(conn->manager_state->plasma_conn->GetQueueItem(object_id.to_plasma_id(), data, data_size, seq_id));
+  
+  printf("process_new_queue_item(): got seq id: %llu\n", seq_id);
+  
+  PlasmaRequestBuffer *buf = new PlasmaRequestBuffer();
+  buf->type = MessageType_PlasmaQueueItemInfo;
+  buf->object_id = object_id;
+  buf->seq_id = seq_id;
+  /* We treat buf->data as a pointer to the concatenated data and metadata, so
+   * we don't actually use buf->metadata. */
+  buf->data = data;
+  buf->data_size = data_size;
+  buf->metadata_size = 0;
+
+  conn->transfer_queue.push_back(buf);
+
+  while (!conn->transfer_queue.empty()) {
+      PlasmaRequestBuffer *buf = conn->transfer_queue.front();
+
+    // TODO: currently simply reuse the queue item notification structure, actually
+    // some of the information is not needed.
+    int err = handle_sigpipe(
+      plasma::SendQueueItemInfo(conn->fd, buf->object_id.to_plasma_id(),
+      buf->seq_id, 0 /*offset */, buf->data_size),
+      conn->fd);
+    ARROW_CHECK(err == 0);
+    if (err == 0) {
+
+      auto nbytes = write(conn->fd, buf->data, buf->data_size);
+      if (nbytes >= 0) {
+         // TODO: this is not true. It's possible that write() returns less than required bytes.
+         ARROW_CHECK(nbytes == buf->data_size);
+         printf("process_new_queue_item(): sent seq id: %llu\n", seq_id);
+         conn->transfer_queue.pop_front();
+      }
+    }   
+  }
+}
+
+void process_remote_subscribe_request(event_loop *loop,
+                              ObjectID obj_id,
+                              const char *addr,
+                              int port,
+                              ClientConnection *conn) {
+  // create new connection to the other plasma manager                                                   
+  ClientConnection *manager_conn =
+      get_manager_connection(conn->manager_state, addr, port, true);
+  if (manager_conn == NULL) {
+    return;
+  }
+
+  // TODO: Fix this:  timeout -1 would wait indefinitely, cause plasma manager to hang.
+  int fd;
+  plasma::Status s = conn->manager_state->plasma_conn->GetQueue(
+    obj_id.to_plasma_id(), -1, &fd, true);
+  ARROW_CHECK_OK(s);
+  manager_conn->subscribed_queues[fd] = obj_id;
+
+  bool success = event_loop_add_file(loop, fd, EVENT_LOOP_READ,
+                                     process_new_queue_item, manager_conn);
+  ARROW_CHECK(success);                                 
+}
+
+plasma::Status ReadBytes(int fd, uint8_t* cursor, size_t length) {
+  ssize_t nbytes = 0;
+  // Termination condition: EOF or read 'length' bytes total.
+  size_t bytesleft = length;
+  size_t offset = 0;
+  while (bytesleft > 0) {
+    nbytes = read(fd, cursor + offset, bytesleft);
+    if (nbytes < 0) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+        continue;
+      }
+      return plasma::Status::IOError(std::string(strerror(errno)));
+    } else if (0 == nbytes) {
+      return plasma::Status::IOError("Encountered unexpected EOF");
+    }
+    ARROW_CHECK(nbytes > 0);
+    bytesleft -= nbytes;
+    offset += nbytes;
+  }
+
+  return plasma::Status::OK();
+}
+
+void process_remote_queue_item(int client_sock, PlasmaQueueItemInfoT& queue_item, ClientConnection *conn) {
+  uint64_t seq_id;
+  std::shared_ptr<Buffer> buffer;
+
+  printf("process_remote_queue_item(): object id: %s, seq id: %llu\n", queue_item.object_id.c_str(), queue_item.seq_id);
+  // TODO: we should support putting the seqid from sender to receiver during CreateQueueItem,
+  // instead of letting receiver to create its own seqid.
+  auto status = conn->manager_state->plasma_conn->CreateQueueItem(
+    plasma::ObjectID::from_binary(queue_item.object_id), queue_item.data_size, &buffer, seq_id);
+  ARROW_CHECK_OK(status);
+
+  status = ReadBytes(client_sock, buffer->mutable_data(), queue_item.data_size);
+  ARROW_CHECK_OK(status);
+
+  status = conn->manager_state->plasma_conn->SealQueueItem(
+    plasma::ObjectID::from_binary(queue_item.object_id), seq_id, buffer);
+   ARROW_CHECK_OK(status);
+}
+
 void process_message(event_loop *loop,
                      int client_sock,
                      void *context,
@@ -1477,9 +1706,32 @@ void process_message(event_loop *loop,
   int64_t type;
   uint8_t *data;
   read_message(client_sock, &type, &length, &data);
+  
+  PlasmaQueueItemInfoT item_info; 
 
   switch (static_cast<MessageType>(type)) {
-  case MessageType::PlasmaDataRequest: {
+  // Sent from local plasma manager to remote plasma manager.
+  case MessageType::PlasmaQueueRemoteSubscribeRequest: {
+    RAY_LOG(DEBUG) << "Processing queue remote subscribe request";
+    plasma::ObjectID object_id;
+    char *address;
+    int port;
+    ARROW_CHECK_OK(
+        plasma::ReadQueueRemoteSubscribeRequest(data, length, &object_id, &address, &port));
+    process_remote_subscribe_request(loop, object_id, address, port, conn);
+    free(address);
+  } break;
+  case MessageType::PlasmaQueueItemInfo: {
+    ARROW_CHECK_OK(
+        plasma::ReadQueueItemInfo(data, length, &item_info));
+    // TODO: this currently doesn't do switch between message and data mode.
+    // The current assumption is that this connection is exclusively used for
+    // this particular queue, and there is only one queue between two managers.
+    // If there are multiple queues in between, then this code needs to be changed.
+    process_remote_queue_item(client_sock, item_info, conn);
+    break;
+  }
+  case MessageType_PlasmaDataRequest: {
     RAY_LOG(DEBUG) << "Processing data request";
     plasma::ObjectID object_id;
     char *address;
@@ -1506,7 +1758,18 @@ void process_message(event_loop *loop,
      * object_ids too so these should be shared in the future. */
     ARROW_CHECK_OK(plasma::ReadFetchRequest(data, length, object_ids_to_fetch));
     process_fetch_requests(conn, object_ids_to_fetch.size(),
-                           object_ids_to_fetch.data());
+                           object_ids_to_fetch.data(), false);
+  } break;
+  // This is sent from client to local plasma manager.
+  case MessageType_PlasmaFetchQueueInfoRequest: {
+    RAY_LOG(DEBUG) << "Processing fetch remote";
+    std::vector<plasma::ObjectID> object_ids_to_fetch;
+    object_ids_to_fetch.resize(1);
+    /* TODO(pcm): process_fetch_requests allocates an array of num_objects
+     * object_ids too so these should be shared in the future. */
+    ARROW_CHECK_OK(plasma::ReadFetchQueueInfoRequest(data, length, &object_ids_to_fetch[0]));
+    process_fetch_requests(conn, object_ids_to_fetch.size(),
+                           object_ids_to_fetch.data(), true);
   } break;
   case MessageType::PlasmaWaitRequest: {
     RAY_LOG(DEBUG) << "Processing wait";

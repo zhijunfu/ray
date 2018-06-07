@@ -43,7 +43,7 @@ fi
 # The PR for this commit is https://github.com/apache/arrow/pull/2235. We
 # include the link here to make it easier to find the right commit because
 # Arrow often rewrites git history and invalidates certain commits.
-TARGET_COMMIT_ID=fa08ddfbe8ada173b2c621172e176f159ce3b728
+#TARGET_COMMIT_ID=fa08ddfbe8ada173b2c621172e176f159ce3b728
 build_arrow() {
   echo "building arrow"
 
@@ -53,7 +53,8 @@ build_arrow() {
   fi
 
   if [[ ! -d $TP_DIR/build/arrow ]]; then
-    git clone https://github.com/apache/arrow.git "$TP_DIR/build/arrow"
+    #git clone https://github.com/apache/arrow.git "$TP_DIR/build/arrow"
+    git clone -b plasma-queue-raylet https://github.com/eric-jj/arrow.git "$TP_DIR/build/arrow"
   fi
 
   if ! [ -x "$(command -v bison)" ]; then
@@ -67,9 +68,9 @@ build_arrow() {
   fi
 
   pushd $TP_DIR/build/arrow
-  git fetch origin master
+  #git fetch origin master
 
-  git checkout $TARGET_COMMIT_ID
+  #git checkout $TARGET_COMMIT_ID
 
   cd cpp
   if [ ! -d "build" ]; then
