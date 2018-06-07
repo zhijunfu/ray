@@ -162,6 +162,7 @@ typedef struct PlasmaRequestBuffer {
   int64_t data_size;
   uint8_t *metadata;
   int64_t metadata_size;
+  uint64_t seq_id;
 } PlasmaRequestBuffer;
 
 /**
@@ -197,7 +198,8 @@ int fetch_timeout_handler(event_loop *loop, timer_id id, void *context);
  */
 ClientConnection *get_manager_connection(PlasmaManagerState *state,
                                          const char *ip_addr,
-                                         int port);
+                                         int port,
+                                         bool is_queue = false);
 
 /**
  * Reads an object chunk sent by the given client into a buffer. This is the

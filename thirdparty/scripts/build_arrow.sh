@@ -45,7 +45,8 @@ if [[ ! -d $TP_DIR/../python/ray/pyarrow_files/pyarrow ]]; then
     echo "building arrow"
 
     if [[ ! -d $TP_DIR/build/arrow ]]; then
-      git clone https://github.com/apache/arrow.git "$TP_DIR/build/arrow"
+      #git clone https://github.com/apache/arrow.git "$TP_DIR/build/arrow"
+      git clone -b plasma-queue-ray https://github.com/eric-jj/arrow.git "$TP_DIR/build/arrow"
     fi
 
     pushd $TP_DIR/build/arrow
@@ -53,7 +54,7 @@ if [[ ! -d $TP_DIR/../python/ray/pyarrow_files/pyarrow ]]; then
     # The PR for this commit is https://github.com/apache/arrow/pull/2065. We
     # include the link here to make it easier to find the right commit because
     # Arrow often rewrites git history and invalidates certain commits.
-    git checkout ce23c06469de9cf0c3e38e35cdb8d135f341b964
+    #git checkout ce23c06469de9cf0c3e38e35cdb8d135f341b964
 
     cd cpp
     if [ ! -d "build" ]; then
