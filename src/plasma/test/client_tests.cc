@@ -341,9 +341,6 @@ TEST plasma_queue_push_and_get_test(void) {
   ARROW_CHECK_OK(client1.CreateQueue(object_id, queue_size, &data));
   // ARROW_CHECK_OK(client1.Seal(object_id));
   // Test that the first client can get the object.
-  // Sleep to allow the queue to be created and information be populated to GCS.
-  // GetQueue() uses Info() which relies on GCS information.
-  sleep(2);
   int notify_fd;
   ARROW_CHECK_OK(client2.GetQueue(object_id, -1, &notify_fd));
   ARROW_CHECK_OK(client2.Contains(object_id, &has_object));
@@ -403,16 +400,15 @@ TEST plasma_queue_batch_push_and_get_test(void) {
   ARROW_CHECK_OK(client1.CreateQueue(object_id, queue_size, &data));
   // ARROW_CHECK_OK(client1.Seal(object_id));
   // Test that the first client can get the object.
-   // Sleep to allow the queue to be created and information be populated to GCS.
-  // GetQueue() uses Info() which relies on GCS information.
-  sleep(2);
   int notify_fd;
   ARROW_CHECK_OK(client2.GetQueue(object_id, -1, &notify_fd));
   ARROW_CHECK_OK(client2.Contains(object_id, &has_object));
   ASSERT(has_object);
 
  // Sleep to make sure the plasma manager for client2 has create local queue
-  // and subscribed to plasma manager for client1.
+  // and subscribed to plasma manager for client1. otherwise if PushQueueItem()
+  // is called before plasma manager subscription, wth current implmentation 
+  // the item notification would not be pushed to client2 (will fix later).
   sleep(5);
 
   std::vector<uint64_t> items;
