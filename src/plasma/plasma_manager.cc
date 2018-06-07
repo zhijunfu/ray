@@ -1156,7 +1156,7 @@ void object_table_subscribe_callback(ObjectID object_id,
       // and trigger process_add_object_notification(). This is to avoid same object_id
       // with different objects added to GCS.
 
-      printf("object_table_subscribe_callback(): object id: %s\n", object_id.to_plasma_id().binary().c_str());
+      //printf("object_table_subscribe_callback(): object id: %s\n", object_id.to_plasma_id().binary().c_str());
       manager_state->local_queues.insert(object_id);
       // Queue case: don't transfer data.
       std::shared_ptr<Buffer> data;
@@ -1599,7 +1599,7 @@ void process_new_queue_item(event_loop *loop,
   uint64_t seq_id;
   ARROW_CHECK_OK(conn->manager_state->plasma_conn->GetQueueItem(object_id.to_plasma_id(), data, data_size, seq_id));
   
-  printf("process_new_queue_item(): got seq id: %llu\n", seq_id);
+  //printf("process_new_queue_item(): got seq id: %llu\n", seq_id);
   
   PlasmaRequestBuffer *buf = new PlasmaRequestBuffer();
   buf->type = MessageType_PlasmaQueueItemInfo;
@@ -1629,7 +1629,7 @@ void process_new_queue_item(event_loop *loop,
       if (nbytes >= 0) {
          // TODO: this is not true. It's possible that write() returns less than required bytes.
          ARROW_CHECK(nbytes == buf->data_size);
-         printf("process_new_queue_item(): sent seq id: %llu\n", seq_id);
+         //printf("process_new_queue_item(): sent seq id: %llu\n", seq_id);
          conn->transfer_queue.pop_front();
       }
     }   
@@ -1687,7 +1687,7 @@ void process_remote_queue_item(int client_sock, PlasmaQueueItemInfoT& queue_item
   uint64_t seq_id;
   std::shared_ptr<Buffer> buffer;
 
-  printf("process_remote_queue_item(): object id: %s, seq id: %llu\n", queue_item.object_id.c_str(), queue_item.seq_id);
+  //printf("process_remote_queue_item(): object id: %s, seq id: %llu\n", queue_item.object_id.c_str(), queue_item.seq_id);
   // TODO: we should support putting the seqid from sender to receiver during CreateQueueItem,
   // instead of letting receiver to create its own seqid.
   auto status = conn->manager_state->plasma_conn->CreateQueueItem(
