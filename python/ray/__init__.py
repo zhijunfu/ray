@@ -47,7 +47,8 @@ except ImportError as e:
     raise
 
 from ray.local_scheduler import ObjectID, _config  # noqa: E402
-from ray.worker import (error_info, init, connect, disconnect, get, put, wait,
+from ray.worker import (error_info, init, connect, disconnect, get, put, 
+                        create_queue, push_queue, read_queue, wait,
                         remote, log_event, log_span, flush_log, get_gpu_ids,
                         get_webui_url,
                         register_custom_serializer)  # noqa: E402
@@ -65,6 +66,7 @@ __version__ = "0.4.0"
 
 __all__ = [
     "error_info", "init", "connect", "disconnect", "get", "put", "wait",
+    "create_queue", "push_queue", "read_queue", 
     "remote", "log_event", "log_span", "flush_log", "actor", "method",
     "get_gpu_ids", "get_webui_url", "register_custom_serializer",
     "SCRIPT_MODE", "WORKER_MODE", "PYTHON_MODE", "SILENT_MODE", "global_state",
