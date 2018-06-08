@@ -6,55 +6,63 @@ from __future__ import division
 from __future__ import print_function
 
 import ray
+import time
 
-# Provider A and Receiver B not using plasma queue
-@ray.remote
-class A(object):
-    def __init__(self):
-        self.b = B.remote()
-
-    def f(self):
-        for i in range(10):
-            self.b.add.remote(i)
-        return ray.get(self.b.get_sum.remote())
-
-@ray.remote
-class B(object):
-    def __init__(self):
-        self.sum = 0
-
-    def add(self, val):
-        self.sum += val
-
-    def get_sum(self):
-        return self.sum
+## Provider A and Receiver B not using plasma queue
+#@ray.remote
+#class A(object):
+#    def __init__(self):
+#        self.b = B.remote()
+#
+#    def f(self):
+#        for i in range(10):
+#            self.b.add.remote(i)
+#        return ray.get(self.b.get_sum.remote())
+#
+#@ray.remote
+#class B(object):
+#    def __init__(self):
+#        self.sum = 0
+#
+#    def add(self, val):
+#        self.sum += val
+#
+#    def get_sum(self):
+#        return self.sum
 
 # Provider A and Receiver B using plasma queue
 @ray.remote
-class A_QUEUE(object):
+class A(object):
     def __init__(self):
-        self.qid = ray.create_queue()
-    
+        print("Actor A start...")
     def f(self):
-        B_QUEUE.remote(self.qid).f.remote()
+        qid = ray.create_queue()
+        print("create_queue success, qid: " + str(qid))
+        time.sleep(5)
+        b = B.remote(qid.id())
+        time.sleep(5)
+        b.f.remote()
+        time.sleep(5)
         for i in range(10):
             ray.push_queue(qid, i)
-        return ray.get(B_QUEUE.remote.get_sum.remote())
+            print("push_queue, val: " + str(i))
+        time.sleep(5)
 
 @ray.remote
-class B_QUEUE(object):
+class B(object):
     def __init__(self, qid):
-        self.qid = qid
+        print("Actor B start...")
+        self.qid = ray.ObjectID(qid)
         self.sum = 0
-
-    def add(self):
+    def f(self):
         for _ in range(10):
-            self.sum += ray.read_queue(qid)
-
+            val = ray.read_queue(self.qid)
+            self.sum += val
+            print("read_queue, val: " + str(val))
     def get_sum(self):
         return self.sum
 
 if __name__ == "__main__":
     ray.init()
-    print(ray.get(A.remote().f.remote()))
-    print(ray.get(A_QUEUE.remote().f.remote()))
+    A.remote().f.remote()
+    time.sleep(20)
