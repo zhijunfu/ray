@@ -2596,7 +2596,7 @@ def create_queue(total_bytes=1024000, worker=global_worker):
             total_bytes=total_bytes)
 
         worker.put_index += 1
-        return queue_id
+        return queue_id.id()
 
 def push_queue(queue_id, value, worker=global_worker):
     """Push an object to the corresponding plasma queue.
@@ -2621,7 +2621,8 @@ def push_queue(queue_id, value, worker=global_worker):
                             "function is not allowed).")
 
         # Serialize and put the object in the plasma queue.
-        worker.store_and_register(queue_id, value, is_plasma_queue=True)
+        worker.store_and_register(ray.ObjectID(queue_id), value,
+                                  is_plasma_queue=True)
 
 def read_queue(queue_id, worker=global_worker, queue_is_subscribed=False):
     """Get an object from the correspongding plasma queue.
@@ -2638,6 +2639,7 @@ def read_queue(queue_id, worker=global_worker, queue_is_subscribed=False):
     with log_span("ray:read_queue", worker=worker):
         check_main_thread()
 
+        queue_id = ray.ObjectID(queue_id)
         if worker.mode == PYTHON_MODE:
             # In PYTHON_MODE, ray.read_queue is the identity operation (the 
             # input will actually be a value not an objectid).
