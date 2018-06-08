@@ -364,14 +364,14 @@ TEST plasma_queue_push_and_get_test(void) {
   ARROW_CHECK_OK(client2.GetQueueItem(object_id, buff, buff_size, seq_id));
   ASSERT(seq_id == 1);
   ASSERT(buff_size == item1_size);
-  for (auto i = 0; i < buff_size; i++) {
+  for (uint32_t i = 0; i < buff_size; i++) {
     ASSERT(buff[i] == item1[i]);
   }
    
   ARROW_CHECK_OK(client2.GetQueueItem(object_id, buff, buff_size, seq_id));
   ASSERT(seq_id == 2);
   ASSERT(buff_size == item2_size);
-  for (auto i = 0; i < buff_size; i++) {
+  for (uint32_t i = 0; i < buff_size; i++) {
     ASSERT(buff[i] == item2[i]);
   }
 
@@ -413,23 +413,23 @@ TEST plasma_queue_batch_push_and_get_test(void) {
 
   std::vector<uint64_t> items;
   items.resize(3000);
-  for (int i = 0; i < items.size(); i++) {
+  for (uint32_t i = 0; i < items.size(); i++) {
     items[i] = i;
   }
 
-  for (int i = 0; i < items.size(); i++) {
+  for (uint32_t i = 0; i < items.size(); i++) {
     uint8_t* data = reinterpret_cast<uint8_t*>(&items[i]);
     uint32_t data_size = static_cast<uint32_t>(sizeof(uint64_t));
     ARROW_CHECK_OK(client1.PushQueueItem(object_id, data, data_size));
   }
 
-  for (int i = 0; i < items.size(); i++) {
+  for (uint32_t i = 0; i < items.size(); i++) {
     uint8_t* buff = nullptr;
     uint32_t buff_size = 0;
     uint64_t seq_id = -1;
 
     ARROW_CHECK_OK(client2.GetQueueItem(object_id, buff, buff_size, seq_id));
-    ASSERT(seq_id == i + 1);
+    ASSERT(static_cast<uint32_t>(seq_id) == i + 1);
     ASSERT(buff_size == sizeof(uint64_t));
     uint64_t value = *(uint64_t*)(buff);
     ASSERT(value == items[i]);
