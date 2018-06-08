@@ -50,7 +50,8 @@ from ray.local_scheduler import ObjectID, _config  # noqa: E402
 from ray.profiling import profile  # noqa: E402
 from ray.worker import (error_info, init, connect, disconnect, get, put, wait,
                         remote, get_gpu_ids, get_resource_ids, get_webui_url,
-                        register_custom_serializer, shutdown)  # noqa: E402
+                        create_queue, push_queue, read_queue,
+                        register_custom_serializer)  # noqa: E402
 from ray.worker import (SCRIPT_MODE, WORKER_MODE, LOCAL_MODE,
                         SILENT_MODE)  # noqa: E402
 from ray.worker import global_state  # noqa: E402
@@ -68,6 +69,7 @@ __all__ = [
     "remote", "profile", "actor", "method", "get_gpu_ids", "get_resource_ids",
     "get_webui_url", "register_custom_serializer", "shutdown", "SCRIPT_MODE",
     "WORKER_MODE", "LOCAL_MODE", "SILENT_MODE", "global_state", "ObjectID",
+    "create_queue", "push_queue", "read_queue",
     "_config", "__version__"
 ]
 

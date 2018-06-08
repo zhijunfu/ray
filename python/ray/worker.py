@@ -236,6 +236,10 @@ class Worker(object):
         # CUDA_VISIBLE_DEVICES environment variable.
         self.original_gpu_ids = ray.utils.get_cuda_visible_devices()
         self.profiler = profiling.Profiler(self)
+        # The index recording the current reading position of a plasma queue
+        self.plasma_queue_reading_index = 0
+        # Mark the plasma queue whether is subscribed before read_queue()
+        self.plasma_queue_is_subscribed = False
 
     def check_connected(self):
         """Check if the worker is connected.
@@ -272,13 +276,15 @@ class Worker(object):
         """
         self.mode = mode
 
-    def store_and_register(self, object_id, value, depth=100):
+    def store_and_register(self, object_id, value, depth=100,
+            is_plasma_queue=False):
         """Store an object and attempt to register its class if needed.
 
         Args:
-            object_id: The ID of the object to store.
-            value: The value to put in the object store.
+            object_id: The ID of the object to store or the plasma queue ID.
+            value: The value to put in the object store or plasma queue.
             depth: The maximum number of classes to recursively register.
+            is_plasma_queue: Whether to push the value to the plasma queue.
 
         Raises:
             Exception: An exception is raised if the attempt to store the
@@ -295,11 +301,18 @@ class Worker(object):
                                 "type {}.".format(type(value)))
             counter += 1
             try:
-                self.plasma_client.put(
-                    value,
-                    object_id=pyarrow.plasma.ObjectID(object_id.id()),
-                    memcopy_threads=self.memcopy_threads,
-                    serialization_context=self.serialization_context)
+                if is_plasma_queue == False:
+                    self.plasma_client.put(
+                        value,
+                        object_id=pyarrow.plasma.ObjectID(object_id.id()),
+                        memcopy_threads=self.memcopy_threads,
+                        serialization_context=self.serialization_context)
+                else:
+                    self.plasma_client.push_queue(
+                        value,
+                        queue_id=pyarrow.plasma.ObjectID(object_id.id()),
+                        memcopy_threads=self.memcopy_threads,
+                        serialization_context=self.serialization_context)
                 break
             except pyarrow.SerializationCallbackError as e:
                 try:
@@ -421,6 +434,50 @@ class Worker(object):
                         ray.utils.push_error_to_driver(
                             self,
                             ray_constants.WAIT_FOR_CLASS_PUSH_ERROR,
+                            warning_message,
+                            driver_id=self.task_driver_id.id())
+                    warning_sent = True
+
+    def _retrieve_object_from_plasma_queue(self, queue_id, index, timeout,
+            error_timeout=10):
+        start_time = time.time()
+        # Only send the warning once.
+        warning_sent = False
+        while True:
+            try:
+                value = self.plasma_client.read_queue(
+                        queue_id=pyarrow.plasma.ObjectID(queue_id.id()),
+                        index=index, timeout_ms=timeout,
+                        serialization_context=self.serialization_context)
+                return value
+            except pyarrow.lib.ArrowInvalid as e:
+                # TODO(ekl): the local scheduler could include relevant
+                # metadata in the task kill case for a better error message
+                invalid_error = RayTaskError(
+                    "<unknown>", None,
+                    "Invalid return value: likely worker died or was killed "
+                    "while executing the task.")
+                return [invalid_error] * len(object_ids)
+            except pyarrow.DeserializationCallbackError as e:
+                # Wait a little bit for the import thread to import the class.
+                # If we currently have the worker lock, we need to release it
+                # so that the import thread can acquire it.
+                if self.mode == WORKER_MODE:
+                    self.lock.release()
+                time.sleep(0.01)
+                if self.mode == WORKER_MODE:
+                    self.lock.acquire()
+
+                if time.time() - start_time > error_timeout:
+                    warning_message = ("This worker or driver is waiting to "
+                                       "receive a class definition so that it "
+                                       "can deserialize an object from the "
+                                       "object store. This may be fine, or it "
+                                       "may be a bug.")
+                    if not warning_sent:
+                        ray.utils.push_error_to_driver(
+                            self.redis_client,
+                            "wait_for_class",
                             warning_message,
                             driver_id=self.task_driver_id.id())
                     warning_sent = True
@@ -2437,6 +2494,129 @@ def put(value, worker=global_worker):
         worker.put_index += 1
         return object_id
 
+def create_queue(total_bytes=1024000, worker=global_worker):
+    """Store a plasma queue in the object store.
+
+    Args:
+        total_bytes: The buffer size of the plasma queue in the object store.
+
+    Returns:
+        The object ID assigned to this value.
+    """
+    worker.check_connected()
+    with log_span("ray:create_queue", worker=worker):
+        check_main_thread()
+
+        if worker.mode == PYTHON_MODE:
+            # In PYTHON_MODE, ray.create_queue is the identity operation.
+            return None
+        queue_id = worker.local_scheduler_client.compute_put_id(
+            worker.current_task_id, worker.put_index, worker.use_raylet)
+        worker.plasma_client.create_queue(
+            pyarrow.plasma.ObjectID(queue_id.id()),
+            total_bytes=total_bytes)
+
+        worker.put_index += 1
+        return queue_id
+
+def push_queue(queue_id, value, worker=global_worker):
+    """Push an object to the corresponding plasma queue.
+
+    Args:
+        queue_id: The object ID of the plasma queue
+        value: The Python object to be stored.
+
+    Returns:
+    """
+    worker.check_connected()
+    with log_span("ray:push_queue", worker=worker):
+        check_main_thread()
+
+        if worker.mode == PYTHON_MODE:
+            # In PYTHON_MODE, ray.put is the identity operation.
+            return value
+        # Make sure that the value is not an object ID.
+        if isinstance(value, ray.ObjectID):
+            raise Exception("Calling 'push_queue' on an ObjectID is not allowed"
+                            "(similarly, returning an ObjectID from a remote "
+                            "function is not allowed).")
+
+        # Serialize and put the object in the plasma queue.
+        worker.store_and_register(queue_id, value, is_plasma_queue=True)
+
+def read_queue(queue_id, worker=global_worker, queue_is_subscribed=False):
+    """Get an object from the correspongding plasma queue.
+
+    This method blocks until the object is available in the plasma queue.
+
+    Args:
+        queue_id: Object ID of the corresponding plasma queue to get object.
+
+    Returns:
+        A Python object.
+    """
+    worker.check_connected()
+    with log_span("ray:read_queue", worker=worker):
+        check_main_thread()
+
+        if worker.mode == PYTHON_MODE:
+            # In PYTHON_MODE, ray.read_queue is the identity operation (the
+            # input will actually be a value not an objectid).
+            return queue_id
+        """Get the value in the plasma store associated with the IDs. Return
+        the value from the plasma store. This will block until the value has
+        been written to the plasma store.
+        """
+        # Make sure that the plasma queue is an object ID.
+        if not isinstance(queue_id, ray.ObjectID):
+            raise Exception("Attempting to call `read_queue` on the value {}, "
+                            "which is not an ObjectID.".format(queue_id))
+        # Do an initial fetch for remote objects.
+        #plain_object_ids = [
+        #    plasma.ObjectID(queue_id.id())
+        #]
+        #if not worker.use_raylet:
+        #    worker.plasma_client.fetch(plain_object_ids)
+        #else:
+        #    print("plasma_client.fetch has not been implemented yet")
+
+        if worker.plasma_queue_is_subscribed == False:
+            worker.plasma_client.get_queue(
+                    queue_id=pyarrow.plasma.ObjectID(queue_id.id()),
+                    timeout_ms=-1)
+            worker.plasma_queue_is_subscribed = True
+
+        # Get the plasma queue. We initially try to get the queue immediately.
+        # This is the interface with the plasma queue server,
+        value = worker._retrieve_object_from_plasma_queue(queue_id,
+                worker.plasma_queue_reading_index, -1)
+        ## Try reconstructing any objects we haven't gotten yet. Try to get them
+        ## until at least get_timeout_milliseconds milliseconds passes, then
+        ## repeat.
+        #if value is None:
+        #    self.local_scheduler_client.reconstruct_object(queue_id)
+        #    # Do another fetch for objects that aren't available locally yet,
+        #    # in case they were evicted since the last fetch.
+        #    if not self.use_raylet:
+        #        self.plasma_client.fetch(queue_id)
+        #    else:
+        #        print("plasma_client.fetch has not been implemented yet")
+        #    value = self._retrieve_object_from_plasma_queue(
+        #        queue_id,
+        #        worker.plasma_queue_reading_index,
+        #        max([
+        #            ray._config.get_timeout_milliseconds(),
+        #            int(0.01)
+        #        ]))
+
+        # If there were objects that we weren't able to get locally, let the
+        # local scheduler know that we're now unblocked.
+        if value is None:
+            worker.local_scheduler_client.notify_unblocked()
+
+        assert value != None
+        worker.plasma_queue_reading_index += 1
+        return value
 
 def wait(object_ids, num_returns=1, timeout=None, worker=global_worker):
     """Return a list of IDs that are ready and a list of IDs that are not.
