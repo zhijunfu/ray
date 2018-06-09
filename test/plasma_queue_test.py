@@ -39,7 +39,7 @@ class A(object):
         qid = ray.create_queue()
         print("create_queue success, qid: " + str(qid))
         time.sleep(5)
-        b = B.remote(qid.id())
+        b = B.remote(qid)
         time.sleep(5)
         b.f.remote()
         time.sleep(5)
@@ -52,7 +52,7 @@ class A(object):
 class B(object):
     def __init__(self, qid):
         print("Actor B start...")
-        self.qid = ray.ObjectID(qid)
+        self.qid = qid
         self.sum = 0
     def f(self):
         for _ in range(10):
