@@ -1,0 +1,69 @@
+
+Install ray on docker.
+
+# cd ray
+# ./build-docker.sh
+
+This would take some time, typically an hour or so. The installed docker image is Ubuntu. 
+
+After installation, we have the following docker images for ray:
+
+zhijunfu@localhost:~/Code/ray.fzj$ docker images
+REPOSITORY              TAG                 IMAGE ID            CREATED             SIZE
+ray-project/examples    latest              608d8ceeb56b        24 hours ago        8.45GB
+ray-project/deploy      latest              b3e214a6e2fb        24 hours ago        5.35GB
+ray-project/base-deps   latest              946d401dbbeb        2 days ago          2.27GB
+ubuntu                  xenial              5e8b97a2a082        3 days ago          114MB
+
+Then we can create two docker containers:
+
+docker run --shm-size=1g -t -i  --name=ray1 ray-project/deploy
+docker run --shm-size=1g -t -i  --name=ray2 ray-project/deploy
+
+So we have:
+
+zhijunfu@localhost:~/Code/ray.fzj$ docker ps -a
+CONTAINER ID        IMAGE                COMMAND             CREATED             STATUS              PORTS               NAMES
+99d711a46b07        ray-project/deploy   "/bin/bash"         21 hours ago        Up 43 minutes                           ray2
+f3559e14813a        ray-project/deploy   "/bin/bash"         21 hours ago        Up 44 minutes                           ray1
+
+  Note: If containers are stopped, later you could use the following commands to start an existing container and login:
+
+  zhijunfu@localhost:~/Code/ray$ docker start ray2
+  zhijunfu@localhost:~/Code/ray$ docker exec -it ray2 bash
+
+Then we setup a ray cluster with containers ray1 and ray2. Say we decide to start redis on ray2:
+
+On ray2, we do:
+
+# ray start --head --redis-port=6379 --resources=='{"Resource1": 4}'
+
+On ray1:
+
+ray start --redis-address 172.17.0.3:6379 --resources='{"Resource1": 2}'
+
+Then resources are used to make sure queue writer and queue reader are scheduled to different nodes.
+
+For the script, we add resource requirements so that queue provider A would be scheduled to ray1, 
+and queue receiver B would be scheduled to ray2. We also need to add redis_address="172.17.0.3:6379" to ray.init(),
+change the specific ip & port appropriately.
+
+
+# Provider A nd Receiver B using plasma queue
+@ray.remote(resources={'Resource1': 2})
+class A(object):
+  ...
+
+@ray.remote(resources={'Resource2': 4})
+class B(object):
+  ...
+
+if __name__ == "__main__":
+    ray.init(redis_address="172.17.0.3:6379")
+
+
+----------
+references:
+http://ray.readthedocs.io/en/latest/install-on-docker.html
+http://ray.readthedocs.io/en/latest/using-ray-on-a-cluster.html
+
