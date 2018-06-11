@@ -307,7 +307,8 @@ class Worker(object):
                         object_id=pyarrow.plasma.ObjectID(object_id.id()),
                         memcopy_threads=self.memcopy_threads,
                         serialization_context=self.serialization_context)
-                elif isinstance(ray.ObjectID(object_id), ray.ObjectID):
+                elif isinstance(object_id, bytes) and isinstance(
+                        ray.ObjectID(object_id), ray.ObjectID):
                     # store a value to the plasma queue.
                     self.plasma_client.push_queue(
                         value,
@@ -389,19 +390,24 @@ class Worker(object):
                 "The object with ID {} already exists in the object store."
                 .format(object_id))
 
-    def retrieve_and_deserialize(self, object_ids, timeout, error_timeout=10,
+    def retrieve_and_deserialize(self,
+                                 object_ids,
+                                 timeout,
+                                 error_timeout=10,
                                  index=0):
         start_time = time.time()
         # Only send the warning once.
         warning_sent = False
         while True:
             try:
-                if isinstance(ray.ObjectID(object_ids), ray.ObjectID):
+                if isinstance(object_ids, bytes) and isinstance(
+                        ray.ObjectID(object_ids), ray.ObjectID):
                     # Get the value from a plasma queue
                     value = self.plasma_client.read_queue(
-                            queue_id=pyarrow.plasma.ObjectID(object_ids),
-                            index=index, timeout_ms=timeout,
-                            serialization_context=self.serialization_context)
+                        queue_id=pyarrow.plasma.ObjectID(object_ids),
+                        index=index,
+                        timeout_ms=timeout,
+                        serialization_context=self.serialization_context)
                     return value
                 else:
                     # We divide very large get requests into smaller get
@@ -2460,6 +2466,7 @@ def put(value, worker=global_worker):
         worker.put_index += 1
         return object_id
 
+
 def create_queue(total_bytes=1024000, worker=global_worker):
     """Store a plasma queue in the object store.
 
@@ -2477,8 +2484,9 @@ def create_queue(total_bytes=1024000, worker=global_worker):
             # In PYTHON_MODE, ray.create_queue is the identity operation.
             return None
         if not isinstance(total_bytes, int):
-            raise Exception("Attempting to call `create_queue` on the value {}, "
-                            "which is not a number type.".format(total_bytes))
+            raise Exception(
+                "Attempting to call `create_queue` on the value {}, "
+                "which is not a number type.".format(total_bytes))
 
         queue_id = worker.local_scheduler_client.compute_put_id(
             worker.current_task_id, worker.put_index, worker.use_raylet)
@@ -2486,11 +2494,12 @@ def create_queue(total_bytes=1024000, worker=global_worker):
         # when passed to function remote()
         queue_id = queue_id.id()
 
-        worker.plasma_client.create_queue(pyarrow.plasma.ObjectID(queue_id),
-                                          total_bytes=total_bytes)
+        worker.plasma_client.create_queue(
+            pyarrow.plasma.ObjectID(queue_id), total_bytes=total_bytes)
 
         worker.put_index += 1
         return queue_id
+
 
 def push_queue(queue_id, value, worker=global_worker):
     """Push an object to the corresponding plasma queue.
@@ -2510,17 +2519,19 @@ def push_queue(queue_id, value, worker=global_worker):
             return value
         # Make sure that the plasma queue is an bytes-like object ID.
         if not isinstance(ray.ObjectID(queue_id), ray.ObjectID):
-            raise Exception("Attempting to call `read_queue` on the value {}, "
-                            "which is not an bytes-like ObjectID.".format(
-                                queue_id))
+            raise Exception(
+                "Attempting to call `read_queue` on the value {}, "
+                "which is not an bytes-like ObjectID.".format(queue_id))
         # Make sure that the value is not an object ID.
         if isinstance(value, ray.ObjectID):
-            raise Exception("Calling 'push_queue' on an ObjectID is not allowed"
-                            "(similarly, returning an ObjectID from a remote "
-                            "function is not allowed).")
+            raise Exception(
+                "Calling 'push_queue' on an ObjectID is not allowed"
+                "(similarly, returning an ObjectID from a remote "
+                "function is not allowed).")
 
         # Serialize and put the object in the plasma queue.
         worker.store_and_register(queue_id, value)
+
 
 def read_queue(queue_id, worker=global_worker, queue_is_subscribed=False):
     """Get an object from the correspongding plasma queue.
@@ -2548,26 +2559,26 @@ def read_queue(queue_id, worker=global_worker, queue_is_subscribed=False):
         """
         # Make sure that the value is not an object ID.
         if isinstance(queue_id, ray.ObjectID):
-            raise Exception("Calling 'read_queue' on an ObjectID is not allowed"
-                            "(similarly, returning an ObjectID from a remote "
-                            "function is not allowed).")
+            raise Exception(
+                "Calling 'read_queue' on an ObjectID is not allowed"
+                "(similarly, returning an ObjectID from a remote "
+                "function is not allowed).")
         # Make sure that the plasma queue is an bytes-like object ID.
         if not isinstance(ray.ObjectID(queue_id), ray.ObjectID):
-            raise Exception("Attempting to call `read_queue` on the value {}, "
-                            "which is not an bytes-like ObjectID.".format(
-                                queue_id))
+            raise Exception(
+                "Attempting to call `read_queue` on the value {}, "
+                "which is not an bytes-like ObjectID.".format(queue_id))
 
         # We should subscribe the plasma queue when calling read_queue() the
         # first time.
         if worker.plasma_queue_is_subscribed == False:
             worker.plasma_client.get_queue(
-                    queue_id=pyarrow.plasma.ObjectID(queue_id),
-                    timeout_ms=-1)
+                queue_id=pyarrow.plasma.ObjectID(queue_id), timeout_ms=-1)
             worker.plasma_queue_is_subscribed = True
 
         # Get the plasma queue. We initially try to get the queue immediately.
-        value = worker.retrieve_and_deserialize(queue_id, -1,
-                worker.plasma_queue_reading_index)
+        value = worker.retrieve_and_deserialize(
+            queue_id, -1, worker.plasma_queue_reading_index)
         ## TODO(zsq): Now we haven't implement it.
         ## Try reconstructing any objects we haven't gotten yet. Try to get them
         ## until at least get_timeout_milliseconds milliseconds passes, then
@@ -2596,6 +2607,7 @@ def read_queue(queue_id, worker=global_worker, queue_is_subscribed=False):
         assert value != None
         worker.plasma_queue_reading_index += 1
         return value
+
 
 def wait(object_ids, num_returns=1, timeout=None, worker=global_worker):
     """Return a list of IDs that are ready and a list of IDs that are not.
