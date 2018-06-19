@@ -7,7 +7,7 @@ import tensorflow as tf
 from ray.rllib.models import ModelCatalog
 
 
-class ProximalPolicyLoss(object):
+class ProximalPolicyGraph(object):
 
     other_output = ["vf_preds", "logprobs"]
     is_recurrent = False
@@ -82,11 +82,17 @@ class ProximalPolicyLoss(object):
             self.policy_results = [
                 self.sampler, self.curr_logits, tf.constant("NA")]
 
-    def compute(self, observation):
+    def compute_actions(self, observations, features, is_training=False):
         action, logprobs, vf = self.sess.run(
             self.policy_results,
-            feed_dict={self.observations: [observation]})
-        return action[0], {"vf_preds": vf[0], "logprobs": logprobs[0]}
+            feed_dict={self.observations: observations})
+        return action, [], {"vf_preds": vf, "logprobs": logprobs}
+
+    def postprocess_trajectory(self, batch):
+        return batch
+
+    def get_initial_state(self):
+        return []
 
     def loss(self):
         return self.loss

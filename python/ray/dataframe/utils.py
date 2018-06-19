@@ -2,7 +2,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import pandas as pd
+import collections
+import pandas
 import numpy as np
 import ray
 
@@ -10,6 +11,96 @@ from . import get_npartitions
 
 
 _NAN_BLOCKS = {}
+_MEMOIZER_CAPACITY = 1000  # Capacity per function
+
+
+class LRUCache:
+    """A LRUCache implemented with collections.OrderedDict
+
+    Notes:
+        - OrderedDict will record the order each item is inserted.
+        - The head of the queue will be LRU items.
+    """
+
+    def __init__(self, capacity):
+        self.capacity = capacity
+        self.cache = collections.OrderedDict()
+
+    def __contains__(self, key):
+        return key in self.cache
+
+    def __getitem__(self, key):
+        """Retrieve item from cache and re-insert it to the back of the queue
+        """
+        value = self.cache.pop(key)
+        self.cache[key] = value
+        return value
+
+    def __setitem__(self, key, value):
+        if key in self.cache:
+            self.cache.pop(key)
+
+        if len(self.cache) >= self.capacity:
+            # Pop oldest items at the beginning of the queue
+            self.cache.popitem(last=False)
+
+        self.cache[key] = value
+
+
+class memoize:
+    """A basic memoizer that cache the input and output of the remote function
+
+    Notes:
+        - How is this implemented?
+          This meoizer is implemented by adding a caching layer to the remote
+          function's remote attribute. When user call f.remote(*args), we will
+          first check against the cache, and then call the ray remote function
+          if we can't find the return value in the cache.
+        - When should this be used?
+          This should be used when we anticipate temporal locality for the
+          function. For example, we can reasonally assume users will perform
+          columnar operation repetitively over time (like sum() or loc[]).
+        - Caveat
+          Don't use this decorator if the any argument to the remote function
+          will mutate. Following snippet will fail
+          ```py
+              @memoize
+              @ray.remote
+              def f(obj):
+                ...
+
+              mutable_obj = [1]
+              oid_1 = f.remote(mutable_obj) # will be cached
+
+              mutable_obj.append(3)
+              oid_2 = f.remote(mutable_obj) # cache hit!
+
+              oid_1 == oid_2 # True!
+           ```
+           In short, use this function sparingly. The ideal case is that all
+           inputs are ray ObjectIDs because they are immutable objects.
+        - Future Development
+          - Fix the mutability bug
+          - Dynamic cache size (Fixed as 1000 for now)
+    """
+
+    def __init__(self, f):
+        # Save of remote function
+        self.old_remote_func = f.remote
+        self.cache = LRUCache(capacity=_MEMOIZER_CAPACITY)
+
+    def remote(self, *args):
+        """Return cached result if the arguments are cached
+        """
+        args = tuple(args)
+
+        if args in self.cache:
+            cached_result = self.cache[args]
+            return cached_result
+
+        result = self.old_remote_func(*args)
+        self.cache[args] = result
+        return result
 
 
 def _get_nan_block_id(n_row=1, n_col=1, transpose=False):
@@ -28,14 +119,14 @@ def _get_nan_block_id(n_row=1, n_col=1, transpose=False):
     shape = (n_row, n_col)
     if shape not in _NAN_BLOCKS:
         arr = np.tile(np.array(np.NaN), shape)
-        _NAN_BLOCKS[shape] = ray.put(pd.DataFrame(data=arr))
+        _NAN_BLOCKS[shape] = ray.put(pandas.DataFrame(data=arr))
     return _NAN_BLOCKS[shape]
 
 
 def _get_lengths(df):
     """Gets the length of the dataframe.
     Args:
-        df: A remote pd.DataFrame object.
+        df: A remote pandas.DataFrame object.
     Returns:
         Returns an integer length of the dataframe object. If the attempt
             fails, returns 0 as the length.
@@ -51,7 +142,7 @@ def _get_lengths(df):
 def _get_widths(df):
     """Gets the width (number of columns) of the dataframe.
     Args:
-        df: A remote pd.DataFrame object.
+        df: A remote pandas.DataFrame object.
     Returns:
         Returns an integer width of the dataframe object. If the attempt
             fails, returns 0 as the length.
@@ -62,6 +153,11 @@ def _get_widths(df):
     # DataFrames
     except TypeError:
         return 0
+
+
+def _get_empty(df):
+    """Return True if the DataFrame is empty"""
+    return df.empty
 
 
 def _partition_pandas_dataframe(df, num_partitions=None, row_chunksize=None):
@@ -87,10 +183,10 @@ def _partition_pandas_dataframe(df, num_partitions=None, row_chunksize=None):
     row_partitions = []
     while len(temp_df) > row_chunksize:
         t_df = temp_df[:row_chunksize]
-        # reset_index here because we want a pd.RangeIndex
+        # reset_index here because we want a pandas.RangeIndex
         # within the partitions. It is smaller and sometimes faster.
         t_df.reset_index(drop=True, inplace=True)
-        t_df.columns = pd.RangeIndex(0, len(t_df.columns))
+        t_df.columns = pandas.RangeIndex(0, len(t_df.columns))
         top = ray.put(t_df)
         row_partitions.append(top)
         temp_df = temp_df[row_chunksize:]
@@ -99,7 +195,7 @@ def _partition_pandas_dataframe(df, num_partitions=None, row_chunksize=None):
         # This call is necessary to prevent modifying original df
         temp_df = temp_df[:]
         temp_df.reset_index(drop=True, inplace=True)
-        temp_df.columns = pd.RangeIndex(0, len(temp_df.columns))
+        temp_df.columns = pandas.RangeIndex(0, len(temp_df.columns))
         row_partitions.append(ray.put(temp_df))
 
     return row_partitions
@@ -132,10 +228,10 @@ def to_pandas(df):
     Returns:
         A new pandas DataFrame.
     """
-    pd_df = pd.concat(ray.get(df._row_partitions), copy=False)
-    pd_df.index = df.index
-    pd_df.columns = df.columns
-    return pd_df
+    pandas_df = pandas.concat(ray.get(df._row_partitions), copy=False)
+    pandas_df.index = df.index
+    pandas_df.columns = df.columns
+    return pandas_df
 
 
 @ray.remote
@@ -251,17 +347,27 @@ def _build_row_lengths(df_row):
 @ray.remote
 def _build_coord_df(lengths, index):
     """Build the coordinate dataframe over all partitions."""
-    coords = np.vstack([np.column_stack((np.full(l, i), np.arange(l)))
-                        for i, l in enumerate(lengths)])
-
+    filtered_lengths = [x for x in lengths if x > 0]
+    coords = None
+    if len(filtered_lengths) > 0:
+        coords = np.vstack([np.column_stack((np.full(l, i), np.arange(l)))
+                            for i, l in enumerate(filtered_lengths)])
     col_names = ("partition", "index_within_partition")
-    return pd.DataFrame(coords, index=index, columns=col_names)
+    return pandas.DataFrame(coords, index=index, columns=col_names)
+
+
+@ray.remote
+def _check_empty(dfs):
+    """Check if all partitions are empty"""
+    return all(ray.get([_deploy_func.remote(_get_empty, d) for d in dfs]))
 
 
 def _create_block_partitions(partitions, axis=0, length=None):
 
     if length is not None and length != 0 and get_npartitions() > length:
         npartitions = length
+    elif length == 0:
+        npartitions = 1
     else:
         npartitions = get_npartitions()
 
@@ -294,8 +400,8 @@ def create_blocks_helper(df, npartitions, axis):
         if df.shape[axis ^ 1] % npartitions == 0 \
         else df.shape[axis ^ 1] // npartitions + 1
 
-    # if not isinstance(df.columns, pd.RangeIndex):
-    #     df.columns = pd.RangeIndex(0, len(df.columns))
+    # if not isinstance(df.columns, pandas.RangeIndex):
+    #     df.columns = pandas.RangeIndex(0, len(df.columns))
 
     blocks = [df.iloc[:, i * block_size: (i + 1) * block_size]
               if axis == 0
@@ -303,27 +409,29 @@ def create_blocks_helper(df, npartitions, axis):
               for i in range(npartitions)]
 
     for block in blocks:
-        block.columns = pd.RangeIndex(0, len(block.columns))
+        block.columns = pandas.RangeIndex(0, len(block.columns))
         block.reset_index(inplace=True, drop=True)
     return blocks
 
 
+@memoize
 @ray.remote
 def _blocks_to_col(*partition):
     if len(partition):
-        return pd.concat(partition, axis=0, copy=False)\
+        return pandas.concat(partition, axis=0, copy=False)\
             .reset_index(drop=True)
     else:
-        return pd.Series()
+        return pandas.Series()
 
 
+@memoize
 @ray.remote
 def _blocks_to_row(*partition):
-    row_part = pd.concat(partition, axis=1, copy=False)\
+    row_part = pandas.concat(partition, axis=1, copy=False)\
         .reset_index(drop=True)
     # Because our block partitions contain different indices (for the
     # columns), this change is needed to ensure correctness.
-    row_part.columns = pd.RangeIndex(0, len(row_part.columns))
+    row_part.columns = pandas.RangeIndex(0, len(row_part.columns))
     return row_part
 
 
@@ -375,7 +483,7 @@ def _reindex_helper(old_index, new_index, axis, npartitions, *df):
     Returns:
         A new set of blocks made up of DataFrames.
     """
-    df = pd.concat(df, axis=axis ^ 1)
+    df = pandas.concat(df, axis=axis ^ 1)
     if axis == 1:
         df.index = old_index
     elif axis == 0:
@@ -404,12 +512,12 @@ def _co_op_helper(func, left_columns, right_columns, left_df_len, left_idx,
     Returns:
          A new set of blocks for the partitioned DataFrame.
     """
-    left = pd.concat(zipped[:left_df_len], axis=1, copy=False).copy()
+    left = pandas.concat(zipped[:left_df_len], axis=1, copy=False).copy()
     left.columns = left_columns
     if left_idx is not None:
         left.index = left_idx
 
-    right = pd.concat(zipped[left_df_len:], axis=1, copy=False).copy()
+    right = pandas.concat(zipped[left_df_len:], axis=1, copy=False).copy()
     right.columns = right_columns
 
     new_rows = func(left, right)
@@ -453,7 +561,7 @@ def _match_partitioning(column_partition, lengths, index):
     column_partition.index = index
     for length in lengths:
         if len(column_partition) == 0:
-            partitioned_list.append(pd.DataFrame(columns=columns))
+            partitioned_list.append(pandas.DataFrame(columns=columns))
             continue
 
         partitioned_list.append(column_partition.iloc[:length, :])
@@ -477,4 +585,4 @@ def fix_blocks_dimensions(blocks, axis):
 @ray.remote
 def _compile_remote_dtypes(*column_of_blocks):
     small_dfs = [df.loc[0:0] for df in column_of_blocks]
-    return pd.concat(small_dfs, copy=False).dtypes
+    return pandas.concat(small_dfs, copy=False).dtypes
