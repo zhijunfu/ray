@@ -233,10 +233,9 @@ class Worker(object):
         # When the worker is constructed. Record the original value of the
         # CUDA_VISIBLE_DEVICES environment variable.
         self.original_gpu_ids = ray.utils.get_cuda_visible_devices()
-        # The index recording the current reading position of a plasma queue
-        self.plasma_queue_reading_index = 0
-        # Mark the plasma queue whether is subscribed before read_queue()
-        self.plasma_queue_is_subscribed = False
+        # A dictionary mapping the ObjectId of a plasma queue to the current
+        # reading position of the queue
+        self.plasma_queue_reading_index = {}
 
     def check_connected(self):
         """Check if the worker is connected.
@@ -2728,14 +2727,14 @@ def read_queue(queue_id, worker=global_worker, queue_is_subscribed=False):
 
         # We should subscribe the plasma queue when calling read_queue() the
         # first time.
-        if worker.plasma_queue_is_subscribed == False:
+        if queue_id not in worker.plasma_queue_reading_index:
             worker.plasma_client.get_queue(
                 queue_id=pyarrow.plasma.ObjectID(queue_id), timeout_ms=-1)
-            worker.plasma_queue_is_subscribed = True
+            worker.plasma_queue_reading_index[queue_id] = 0
 
         # Get the plasma queue. We initially try to get the queue immediately.
         value = worker.retrieve_and_deserialize(
-            queue_id, -1, worker.plasma_queue_reading_index)
+            queue_id, -1, worker.plasma_queue_reading_index[queue_id])
         ## TODO(zsq): Now we haven't implement it.
         ## Try reconstructing any objects we haven't gotten yet. Try to get them
         ## until at least get_timeout_milliseconds milliseconds passes, then
@@ -2762,7 +2761,7 @@ def read_queue(queue_id, worker=global_worker, queue_is_subscribed=False):
             worker.local_scheduler_client.notify_unblocked()
 
         assert value != None
-        worker.plasma_queue_reading_index += 1
+        worker.plasma_queue_reading_index[queue_id] += 1
         return value
 
 
