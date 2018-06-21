@@ -37,6 +37,30 @@ public interface RayApi {
   <T> List<T> getMeta(List<UniqueID> objectIds) throws TaskExecutionException;
 
   /**
+   * Create a plasma queue in the object store.
+   *
+   * @param totalBytes buffer size of the plasma queue in the object store.
+   * @return UniqueID
+   */
+  UniqueID createQueue(int totalBytes);
+
+  /**
+   * Put obj into the plasma queue.
+   *
+   * @param qid the objectID of the plasma queue.
+   * @param obj the Java obj to be stored.
+   */
+  <T> void pushQueue(UniqueID qid, T obj);
+
+  /**
+   * Get a obj from the plasma queue.
+   *
+   * @param qid the objectID of the plasma queue.
+   * @return Object
+   */
+  <T> T readQueue(UniqueID qid);
+
+  /**
    * wait until timeout or enough RayObjects are ready.
    *
    * @param waitfor    wait for who

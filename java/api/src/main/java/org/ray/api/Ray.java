@@ -52,6 +52,27 @@ public final class Ray extends Rpc {
   }
 
   /**
+   * Create a plasma queue in the object store.
+   */
+  public static UniqueID createQueue(int totalBytes) {
+    return impl.createQueue(totalBytes);
+  }
+
+  /**
+   * Put a obj into the plasma queue.
+   */
+  public static <T> void pushQueue(UniqueID qid, T obj) {
+    impl.pushQueue(qid, obj);
+  }
+
+  /**
+   * Get a obj from the plasma queue.
+   */
+  public static <T> T readQueue(UniqueID qid) {
+    return impl.readQueue(qid);
+  }
+
+  /**
    * wait until timeout or enough RayObject are ready.
    *
    * @param waitfor             wait for who
