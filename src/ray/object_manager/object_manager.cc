@@ -86,6 +86,10 @@ void ObjectManager::StopIOService() {
 void ObjectManager::NotifyDirectoryObjectAdd(const ObjectInfoT &object_info) {
   ObjectID object_id = ObjectID::from_binary(object_info.object_id);
   local_objects_[object_id] = object_info;
+  if (object_is is queue) {
+    // Don't report locally created queue object.
+    return;
+  }
   ray::Status status =
       object_directory_->ReportObjectAdded(object_id, client_id_, object_info);
   // Handle the unfulfilled_push_requests_ which contains the push request that is not
@@ -165,6 +169,13 @@ ray::Status ObjectManager::Pull(const ObjectID &object_id, const ClientID &clien
 
 ray::Status ObjectManager::PullEstablishConnection(const ObjectID &object_id,
                                                    const ClientID &client_id) {
+
+  return EstablishSendConnection(object_id, client_id, PullSendRequest);
+}
+
+ray::Status ObjectManager::EstablishSendConnection(const ObjectID &object_id,
+                                                   const ClientID &client_id,
+                                                   const MessageSendCallback &callback) {
   // Acquire a message connection and send pull request.
   ray::Status status;
   std::shared_ptr<SenderConnection> conn;
@@ -184,7 +195,7 @@ ray::Status ObjectManager::PullEstablishConnection(const ObjectID &object_id,
               ConnectionPool::ConnectionType::MESSAGE, connection_info);
           connection_pool_.RegisterSender(ConnectionPool::ConnectionType::MESSAGE,
                                           client_id, async_conn);
-          Status pull_send_status = PullSendRequest(object_id, async_conn);
+          Status pull_send_status = callback(object_id, async_conn);
           RAY_CHECK_OK(pull_send_status);
         },
         [](const Status &status) {
@@ -192,7 +203,7 @@ ray::Status ObjectManager::PullEstablishConnection(const ObjectID &object_id,
           RAY_CHECK_OK(status);
         });
   } else {
-    status = PullSendRequest(object_id, conn);
+    status = callback(object_id, conn);
   }
   return status;
 }
@@ -654,5 +665,165 @@ void ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
   RAY_LOG(DEBUG) << "ReceiveCompleted " << client_id_ << " " << object_id << " "
                  << "/" << config_.max_receives;
 }
+
+ray::Status ObjectManager::SubscribeQueue(const ObjectID &object_id,
+                                          const SubscribeQueueCallback &callback) {
+
+  if (local_objects_.count(object_id) != 0) {
+    // Queue is already local, invoke the callback and return.
+    // This include queues created by this object manager (which is in-sync with remote queue).
+    callback(true);
+    return ray::Status::OK();
+  }
+   
+  RAY_RETURN_NOT_OK(object_directory_->LookupLocations(
+      object_id, [this, callback](const std::vector<ClientID> &client_ids,
+                                  const ObjectID &lookup_object_id) {
+        if (client_ids.empty()) {
+          callback(false);
+          return;
+        }
+
+        const ObjectID &object_id = lookup_object_id;
+        RAY_CHECK(!client_ids.empty());
+        RAY_CHECK_OK(PullObjectInfo(object_id, client_id[0]));
+
+        auto object_info_available_callback = [this, object_id, callback] (uint64_t data_size) {
+          // TODO: check if the object is indeeded a queue. This can be done by adding a new field
+          // in ObjectInfoT, and passed to this callback.
+
+          // 1. Create local queue (whose size is the same as remote queue).
+          auto status = buffer_pool_.CreateQueue(object_id, data_size, 0);
+
+          // 2. Invoke the queue subscription callback.
+          callback(status.ok());
+
+          // 3. Subscribe remote queue to make local queue in-sync with remote.
+          // Only do this if CreateQueue above succeeds.
+          if (status.ok()) {
+            SubscribeRemoteQueue(object_id, client_id);
+          }
+              
+        }
+
+        // Add callback to map.
+
+      }));
+}
+
+ray::Status ObjectManager::SubscribeQueueSendRequest(const ObjectID &object_id,
+                                                     std::shared_ptr<SenderConnection> &conn) {
+  flatbuffers::FlatBufferBuilder fbb;
+  auto message = object_manager_protocol::CreatePullObjectInfoMessage(
+      fbb, fbb.CreateString(client_id_.binary()), fbb.CreateString(object_id.binary()));
+  fbb.Finish(message);
+  RAY_CHECK_OK(conn->WriteMessage(
+      static_cast<int64_t>(object_manager_protocol::MessageType::PullObjectInfo),
+      fbb.GetSize(), fbb.GetBufferPointer()));
+  RAY_CHECK_OK(
+      connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::MESSAGE, conn));
+  return ray::Status::OK();
+}
+
+void ObjectManager::ReceivePullObjectInfoRequest(std::shared_ptr<TcpClientConnection> &conn,
+                                                 const uint8_t *message) {
+  // Serialize and push object to requesting client.
+  auto pr = flatbuffers::GetRoot<object_manager_protocol::PullObjectInfoMessage>(message);
+  ObjectID object_id = ObjectID::from_binary(pr->object_id()->str());
+  ClientID client_id = ClientID::from_binary(pr->client_id()->str());
+  ray::Status push_status = PushObjectInfo(object_id, client_id);
+  conn->ProcessMessages();
+}
+
+ray::Status ObjectManager::PullObjectInfo(const ObjectID &object_id, const ClientID &client_id) {
+  // Check if object is already local.
+  if (local_objects_.count(object_id) != 0) {
+    RAY_LOG(ERROR) << object_id << " attempted to pull an object that's already local.";
+    return ray::Status::OK();
+  }
+  // Check if we're pulling from self.
+  if (client_id == client_id_) {
+    RAY_LOG(ERROR) << client_id_ << " attempted to pull an object from itself.";
+    return ray::Status::Invalid("A node cannot pull an object from itself.");
+  }
+  return EstablishSendConnection(object_id, client_id, PullObjectInfoSendRequest);
+};
+
+ray::Status ObjectManager::PullObjectInfoSendRequest(const ObjectID &object_id,
+                                                     std::shared_ptr<SenderConnection> &conn) {
+  flatbuffers::FlatBufferBuilder fbb;
+  auto message = object_manager_protocol::CreatePullObjectInfoMessage(
+      fbb, fbb.CreateString(client_id_.binary()), fbb.CreateString(object_id.binary()));
+  fbb.Finish(message);
+  RAY_CHECK_OK(conn->WriteMessage(
+      static_cast<int64_t>(object_manager_protocol::MessageType::PullObjectInfo),
+      fbb.GetSize(), fbb.GetBufferPointer()));
+  RAY_CHECK_OK(
+      connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::MESSAGE, conn));
+  return ray::Status::OK();
+}
+
+void ObjectManager::ReceivePullObjectInfoRequest(std::shared_ptr<TcpClientConnection> &conn,
+                                                 const uint8_t *message) {
+  // Serialize and push object to requesting client.
+  auto pr = flatbuffers::GetRoot<object_manager_protocol::PullObjectInfoMessage>(message);
+  ObjectID object_id = ObjectID::from_binary(pr->object_id()->str());
+  ClientID client_id = ClientID::from_binary(pr->client_id()->str());
+  ray::Status push_status = PushObjectInfo(object_id, client_id);
+  conn->ProcessMessages();
+}
+
+ray::Status ObjectManager::PushObjectInfo(const ObjectID &object_id, const ClientID &client_id) {
+  // Check if object is already local.
+  if (local_objects_.count(object_id) == 0) {
+    return ray::Status::OK();
+  }
+  // Check if we're pulling from self.
+  if (client_id == client_id_) {
+    RAY_LOG(ERROR) << client_id_ << " attempted to push an object to itself.";
+    return ray::Status::Invalid("A node cannot push an object to itself.");
+  }
+  return EstablishSendConnection(object_id, client_id, PushObjectInfoSendRequest);
+};
+
+ray::Status ObjectManager::PushObjectInfoSendRequest(const ObjectID &object_id,
+                                                     std::shared_ptr<SenderConnection> &conn) {
+  
+  const ObjectInfoT &object_info = local_objects_[object_id];
+  uint64_t data_size = static_cast<uint64_t>(object_info.data_size + object_info.metadata_size);
+  uint64_t metadata_size = static_cast<uint64_t>(object_info.metadata_size);
+
+  flatbuffers::FlatBufferBuilder fbb;
+  auto message = object_manager_protocol::CreatePushObjectInfoMessage(
+      fbb, fbb.CreateString(client_id_.binary()), fbb.CreateString(object_id.binary()), 
+      data_size, metadata_size);
+  fbb.Finish(message);
+  RAY_CHECK_OK(conn->WriteMessage(
+      static_cast<int64_t>(object_manager_protocol::MessageType::PushObjectInfoMessage),
+      fbb.GetSize(), fbb.GetBufferPointer()));
+  RAY_CHECK_OK(
+      connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::MESSAGE, conn));
+  return ray::Status::OK();
+}
+
+void ObjectManager::ReceivePushObjectInfoRequest(std::shared_ptr<TcpClientConnection> &conn,
+                                                 const uint8_t *message) {
+  // Serialize.
+  auto object_header =
+      flatbuffers::GetRoot<object_manager_protocol::PushObjectInfoMessage>(message);
+  ObjectID object_id = ObjectID::from_binary(object_header->object_id()->str());
+  uint64_t data_size = object_header->data_size();
+  uint64_t metadata_size = object_header->metadata_size();
+
+  if (there is a subscribe object info callback) {
+    // 1. Create local queue.
+    // 2. Invoke callback for queue subscription.
+    // 3. send subscribe queue message 
+    invoke callback();
+    remove callback.
+  }
+
+}
+
 
 }  // namespace ray

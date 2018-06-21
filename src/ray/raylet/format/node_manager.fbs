@@ -58,7 +58,13 @@ enum MessageType:int {
   WaitRequest,
   // The response message to WaitRequest; replies with the objects found and objects
   // remaining.
-  WaitReply
+  WaitReply,
+  // A request to subscribe to a plasma queue which resides on a remote machine, this 
+  // would create a queue in local plasma store which is kept in-sync with remote queue.
+  SubscribeQueueRequest,
+  // The response message to SubscribeQueueRequest, replies with whether the subscription
+  // succeeds.
+  SubscribeQueueReply
 }
 
 table TaskExecutionSpecification {
@@ -153,4 +159,14 @@ table WaitReply {
   found: [string];
   // List of object ids not found.
   remaining: [string];
+}
+
+table SubscribeQueueRequest {
+  // Object id of the subscribed queue object.
+  object_id: string;  
+}
+
+table SubscribeQueueReply {
+  // If the subscription succeeds.
+  success: bool;  
 }

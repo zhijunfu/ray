@@ -124,6 +124,17 @@ class ObjectBufferPool {
   /// \param chunk_index The index of the chunk.
   void SealChunk(const ObjectID &object_id, uint64_t chunk_index);
 
+  /// Create a queue object in local plasma store.
+  ///
+  /// \param object_id The ObjectID.
+  /// \param data_size The sum of the object size and metadata size.
+  /// \param metadata_size The size of the metadata.
+  /// \return status of invoking this method.
+  /// An IOError status is returned if object creation on the store client fails.
+  /// (with no intermediate AbortCreateChunk).
+  ray::Status CreateQueue(
+      const ObjectID &object_id, uint64_t data_size, uint64_t metadata_size);
+
  private:
   /// Abort the create operation associated with an object. This destroys the buffer
   /// state, including create operations in progress for all chunks of the object.

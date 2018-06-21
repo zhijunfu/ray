@@ -161,6 +161,16 @@ class ObjectManager : public ObjectManagerInterface {
                    uint64_t num_required_objects, bool wait_local,
                    const WaitCallback &callback);
 
+  using SubscribeQueueCallback = std::function<void(bool success)>;
+
+  /// Subscribe a queue specified by object_id. If the object is already local,
+  /// invoke the callback directly and return. Otherwise, lookup the location
+  /// for the queue object, create a queue with the same size in local store,
+  /// and subscribe to the remote queue so both queues are in-sync, the callback
+  /// will tell if the subscription succeeds.
+  ray::Status SubscribeQueue(const ObjectID &object_id,
+                             const SubscribeQueueCallback &callback);
+
  private:
   friend class TestObjectManager;
 
@@ -266,6 +276,13 @@ class ObjectManager : public ObjectManagerInterface {
 
   /// Register object remove with directory.
   void NotifyDirectoryObjectDeleted(const ObjectID &object_id);
+
+  using MessageSendCallback = std::function<
+      ray::Status (const ObjectID &object_id,
+                   std::shared_ptr<SenderConnection> &conn)>;
+  ray::Status EstablishSendConnection(const ObjectID &object_id,
+                                      const ClientID &client_id,
+                                      const MessageSendCallback &callback);  
 
   /// Part of an asynchronous sequence of Pull methods.
   /// Uses an existing connection or creates a connection to ClientID.
