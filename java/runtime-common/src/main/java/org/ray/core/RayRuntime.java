@@ -256,6 +256,36 @@ public abstract class RayRuntime implements RayApi {
   }
 
   @Override
+  public UniqueID createQueue(int totalBytes) {
+    UniqueID taskId = getCurrentTaskId();
+    UniqueID objectId = getCurrentTaskNextPutId();
+
+    RayLog.core.info("Task " + taskId.toString() + " Object " + objectId.toString() + " createQueue");
+    localSchedulerProxy.markTaskPutDependency(taskId, objectId);
+    objectStoreProxy.createQueue(objectId, totalBytes);
+    return objectId;
+  }
+
+  @Override
+  public <T> void pushQueue(UniqueID qid, T obj) {
+    UniqueID taskId = getCurrentTaskId();
+
+    RayLog.core.info("Task " + taskId.toString() + " Plasma queue " + qid.toString() + " pushQueue");
+    objectStoreProxy.pushQueue(qid, obj);
+  }
+
+  @Override
+  public <T> T readQueue(UniqueID qid) {
+    UniqueID taskId = getCurrentTaskId();
+
+    RayLog.core.info("Task " + taskId.toString() + " Plasma queue " + qid.toString() + " readQueue");
+
+    if (!worker.isSubscribedPlasmaQueue(qid)) { objectStoreProxy.getQueue(qid); }
+
+    return objectStoreProxy.readQueue(qid, worker.plasmaQueueReadingIndex(qid));
+  }
+
+  @Override
   public <T> WaitResult<T> wait(RayList<T> waitfor, int numReturns, int timeout) {
     return objectStoreProxy.wait(waitfor, numReturns, timeout);
   }

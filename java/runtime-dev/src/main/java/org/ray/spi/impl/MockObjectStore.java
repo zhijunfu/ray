@@ -48,6 +48,18 @@ public class MockObjectStore implements ObjectStoreLink {
   }
 
   @Override
+  public void createQueue(byte[] var1, int var2) { return; }
+
+  @Override
+  public void pushQueue(byte[] var1, byte[] var2) { return; }
+
+  @Override
+  public void getQueue(byte[] var1, int var2) { return; }
+
+  @Override
+  public byte[] readQueue(byte[] var1, long var2, int var4) { return null; }
+
+  @Override
   public List<byte[]> wait(byte[][] objectIds, int timeoutMs, int numReturns) {
     ArrayList<byte[]> rets = new ArrayList<>();
     for (byte[] objId : objectIds) {
