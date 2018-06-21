@@ -558,7 +558,23 @@ void NodeManager::ProcessClientMessage(
 
     RAY_CHECK_OK(gcs_client_->profile_table().AddProfileEventBatch(*message));
   } break;
-
+  case protocol::MessageType::SubscribeQueueRequest: {
+    // Read the data.
+    auto message = flatbuffers::GetRoot<protocol::SubscribeQueueRequest>(message_data);
+    ObjectID object_id = from_flatbuf(*message->object_id());
+    
+    ray::Status status = object_manager_.SubscribeQueue(object_id, 
+        [client](bool success) {
+          flatbuffers::FlatBufferBuilder fbb;
+          flatbuffers::Offset<protocol::SubscribeQueueReply> sub_reply = protocol::CreateSubscribeQueueReply(
+              fbb, to_flatbuf(fbb, success));
+          fbb.Finish(sub_reply);
+          RAY_CHECK_OK(
+              client->WriteMessage(static_cast<int64_t>(protocol::MessageType::SubscribeQueueReply),
+                                   fbb.GetSize(), fbb.GetBufferPointer()));
+        });
+    RAY_CHECK_OK(status);
+  } break;
   default:
     RAY_LOG(FATAL) << "Received unexpected message type " << message_type;
   }

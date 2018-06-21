@@ -4,7 +4,9 @@ namespace ray.object_manager.protocol;
 enum MessageType:int {
   ConnectClient = 1,
   PushRequest,
-  PullRequest
+  PullRequest,
+  PullObjectInfo,
+  PushObjectInfo
 }
 
 table PushRequestMessage {
@@ -30,4 +32,20 @@ table ConnectClientMessage {
   client_id: string;
   // Whether this is a transfer connection.
   is_transfer: bool;
+}
+
+table PullObjectInfoMessage {
+  // ID of the requesting client.
+  client_id: string;
+  // Requested ObjectID.
+  object_id: string;
+}
+
+table PushObjectInfoMessage {
+  // The object ID being transferred.
+  object_id: string;
+  // The total size of the object + metadata.
+  data_size: ulong;
+  // The metadata size.
+  metadata_size: ulong;
 }
