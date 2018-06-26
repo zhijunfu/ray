@@ -82,7 +82,11 @@ public class ObjectStoreProxy {
   }
 
   public void put(UniqueID id, Object obj, Object metadata) {
-    store.put(id.getBytes(), Serializer.encode(obj), Serializer.encode(metadata));
+    byte[] obj_data = Serializer.encode(obj);
+    byte[] meta_data = Serializer.encode(metadata);
+    RayLog.core.info("put " + id.toString() + " object size: "+ obj_data.length + " metadata size: " + meta_data.length);
+    store.put(id.getBytes(), obj_data, meta_data);
+    RayLog.core.info("put done " + id.toString());
   }
 
   public void createQueue(UniqueID id, int totalBytes) {
