@@ -18,20 +18,24 @@ import java.text.*;
  * Plasma queue test.
  */
 
-public class HelloWorld {
+public class PlasmaQueuePerf {
 
   public static void main(String[] args) throws Exception {
         try {
           Ray.init();
+
+          Integer numOfItems = 100 * 1000;
+          Integer queueSize = 200 * 1000 * 1000;
 /*
           RayLog.rapp.warn("plasma queue test started......");          
-          RayActor<A> a = Ray.create(HelloWorld.A.class);      
-          Ray.call(A::f, a);
-          Thread.sleep(20000);
+          RayActor<A> a = Ray.create(PlasmaQueuePerf.A.class);      
+          Ray.call(A::f, a, numOfItems, queueSize);
+          Thread.sleep(30 * 1000);
 */
+
           RayLog.rapp.warn("plasma object test started......");   
-          RayActor<AA> aa = Ray.create(HelloWorld.AA.class);
-          Ray.call(AA::f, aa);
+          RayActor<AA> aa = Ray.create(PlasmaQueuePerf.AA.class);
+          Ray.call(AA::f, aa, numOfItems);
           Thread.sleep(100 * 1000);
 
         } catch (Throwable t) {
@@ -48,15 +52,14 @@ public class HelloWorld {
       RayLog.rapp.warn("Actor A started......");
     }
 
-    public Integer f() throws InterruptedException {
+    public Integer f(Integer numOfItems, Integer queueSize) throws InterruptedException {
       // Create a plasma queue
-      UniqueID qid = Ray.createQueue(100 * 1000 * 1000);
+      UniqueID qid = Ray.createQueue(queueSize);
       RayLog.rapp.warn("Create plasma queueu successfully......");
 
       Thread.sleep(2000);
 
-      Integer numOfItems = 100 * 1000;
-      RayActor<HelloWorld.B> b = Ray.create(HelloWorld.B.class);
+      RayActor<PlasmaQueuePerf.B> b = Ray.create(PlasmaQueuePerf.B.class);
       Ray.call(B::setQid, b, qid);
       Ray.call(B::setNumOfItems, b, numOfItems);
 
@@ -118,9 +121,8 @@ public class HelloWorld {
       RayLog.rapp.warn("Actor AAA started......");
     }
 
-    public Integer f() throws InterruptedException {
-      Integer numOfItems = 100 * 1000;
-      RayActor<HelloWorld.BB> b = Ray.create(HelloWorld.BB.class);
+    public Integer f(Integer numOfItems) throws InterruptedException {
+      RayActor<PlasmaQueuePerf.BB> b = Ray.create(PlasmaQueuePerf.BB.class);
       // Ray.call(BB::setQid, b, qid);
       Ray.call(BB::setNumOfItems, b, numOfItems);
 
@@ -129,6 +131,7 @@ public class HelloWorld {
       RayLog.rapp.warn("push_object start......" + timeStamp);
       for (int i=0; i< numOfItems;i=i+1) {
         Ray.call(BB::f, b, i);
+        // Ray.put(i);
       }
       timeStamp = new SimpleDateFormat("yyyy.MM.dd.HH.mm.ss.SSS").format(new Date());
       RayLog.rapp.warn("push_object end......" + timeStamp);
