@@ -1,5 +1,6 @@
 package org.ray.core;
 
+import java.io.IOException;
 import java.io.Serializable;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
@@ -21,6 +22,7 @@ import org.ray.api.UniqueID;
 import org.ray.api.WaitResult;
 import org.ray.api.internal.RayFunc;
 import org.ray.core.model.RayParameters;
+import org.ray.core.model.RayDriverParameters;
 import org.ray.spi.LocalSchedulerLink;
 import org.ray.spi.LocalSchedulerProxy;
 import org.ray.spi.ObjectStoreProxy;
@@ -32,6 +34,7 @@ import org.ray.util.exception.TaskExecutionException;
 import org.ray.util.logger.DynamicLog;
 import org.ray.util.logger.DynamicLogManager;
 import org.ray.util.logger.RayLog;
+import org.ray.util.FileUtil;
 
 /**
  * Core functionality to implement Ray APIs.
@@ -41,6 +44,8 @@ public abstract class RayRuntime implements RayApi {
   public static ConfigReader configReader;
   protected static RayRuntime ins = null;
   protected static RayParameters params = null;
+  protected static RayDriverParameters driverParams = null;
+  protected static byte[] packageZip = null;
   private static boolean fromRayInit = false;
   protected Worker worker;
   protected LocalSchedulerProxy localSchedulerProxy;
@@ -65,6 +70,60 @@ public abstract class RayRuntime implements RayApi {
     return ins;
   }
 
+  // app level Ray.init()
+  // make it private so there is no direct usage but only from Ray.init
+  // This is different from the above in that this assumes that ray processes
+  // have already been started on this machine.
+  private static RayRuntime init(String[] args, boolean fromDriver) {
+    if (ins == null) {
+      try {
+        if (!fromDriver) {
+          throw new Exception("Invalid parameters for Ray.init(args)");
+        }
+
+        fromRayInit = true;
+        RayRuntime.initWithArgs(args);
+        fromRayInit = false;
+
+       } catch (Exception e) {
+        e.printStackTrace();
+        throw new RuntimeException("Ray.init(args) failed", e);
+       }
+    }
+    return ins;
+  }
+
+  // Helper function.
+  private static RayRuntime initWithArgs(String[] args) throws Exception {
+
+    List<String> remaining = new ArrayList<String>();
+    String packageName = null;
+    String className = null;
+    for (String arg : args) {
+      if (arg.startsWith("--package=")) {
+        packageName = arg.substring("--package=".length());
+      } else if (arg.startsWith("--class=")) {
+        className = arg.substring("--class=".length());
+      } else {
+        remaining.add(arg);
+      }
+    }
+    
+    if (packageName == null || className == null) {
+      throw new Exception(
+          "--package and --class must be specified");
+    }
+
+    String remainingArgs[] = new String[remaining.size()];
+    remaining.toArray(remainingArgs);
+
+    RayRuntime.driverParams = new RayDriverParameters(packageName, className);
+
+    packageZip = FileUtil.fileToBytes(driverParams.packageName);
+ 
+    return RayRuntime.init(remainingArgs);    
+  }
+   
   // engine level RayRuntime.init(xx, xx)
   // updateConfigStr is sth like section1.k1=v1;section2.k2=v2
   public static RayRuntime init(String configPath, String updateConfigStr) throws Exception {
@@ -128,6 +187,28 @@ public abstract class RayRuntime implements RayApi {
     localSchedulerProxy = new LocalSchedulerProxy(slink);
     objectStoreProxy = new ObjectStoreProxy(plink);
     worker = new Worker(localSchedulerProxy, functions);
+
+    // Deal with app Ray.init() with parameters.
+    RegisterDriver(remoteFunctionManager);
+  }
+
+  protected void RegisterDriver(RemoteFunctionManager functionManager) {
+    if (driverParams == null) {
+      return;
+    }
+
+    String packageName = driverParams.packageName.substring(
+      driverParams.packageName.lastIndexOf('/') + 1,
+      driverParams.packageName.lastIndexOf('.')); 
+
+      UniqueID resourceId = functionManager.registerResource(packageZip);
+      RayLog.rapp.debug(
+          "registerResource " + resourceId + " for package " + packageName + " done");
+  
+      // register app
+      UniqueID driver_id = params.driver_id;
+      functionManager.registerApp(driver_id, resourceId);
+      RayLog.rapp.debug("registerApp " + driver_id + " for resouorce " + resourceId + " done"); 
   }
 
   private static RayRuntime instantiate(RayParameters params) {

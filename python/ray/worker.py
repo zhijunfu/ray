@@ -1525,6 +1525,9 @@ def _init(address_info=None,
             arguments is passed in.
     """
     check_main_thread()
+    
+    traceback.print_stack()
+    
     if driver_mode not in [SCRIPT_MODE, PYTHON_MODE, SILENT_MODE]:
         raise Exception("Driver_mode must be in [ray.SCRIPT_MODE, "
                         "ray.PYTHON_MODE, ray.SILENT_MODE].")

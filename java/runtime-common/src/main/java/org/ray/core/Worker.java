@@ -28,11 +28,20 @@ import org.ray.util.logger.RayLog;
  * continuously.
  */
 public class Worker {
-
   private final LocalSchedulerProxy scheduler;
   private final LocalFunctionManager functions;
 
   public Worker(LocalSchedulerProxy scheduler, LocalFunctionManager functions) {
+    new Exception().printStackTrace();
+
+    RayLog.core.warn("Printing stack trace:");
+    StackTraceElement[] elements = Thread.currentThread().getStackTrace();
+    for (int i = 1; i < elements.length; i++) {
+      StackTraceElement s = elements[i];
+      RayLog.core.warn("\tat " + s.getClassName() + "." + s.getMethodName()
+          + "(" + s.getFileName() + ":" + s.getLineNumber() + ")");
+    }
+
     this.scheduler = scheduler;
     this.functions = functions;
   }
@@ -52,6 +61,8 @@ public class Worker {
     if (!task.actorId.isNil() || (task.createActorId != null && !task.createActorId.isNil())) {
       task.returnIds = ArrayUtils.subarray(task.returnIds, 0, task.returnIds.length - 1);
     }
+
+    new Exception().printStackTrace();
 
     try {
       Pair<ClassLoader, RayMethod> pr = funcs
@@ -80,6 +91,9 @@ public class Worker {
       int returnCount,
       boolean multiReturn,
       Object[] args) {
+    
+    new Exception().printStackTrace();
+    
     RayInvocation ri = createRemoteInvocation(methodId, args, RayActor.nil);
     return scheduler.submit(taskId, ri, returnCount, multiReturn);
   }
@@ -90,6 +104,9 @@ public class Worker {
       boolean multiReturn,
       Object[] args,
       RayActor<?> actor) {
+    
+    new Exception().printStackTrace();
+
     RayInvocation ri = createRemoteInvocation(methodId, args, actor);
     RayObjects returnObjs = scheduler.submit(taskId, ri, returnCount + 1, multiReturn);
     actor.setTaskCursor(returnObjs.pop().getId());

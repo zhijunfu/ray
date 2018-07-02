@@ -80,6 +80,7 @@ public class StateStoreProxyImpl implements StateStoreProxy {
         return getAddressInfoHelper(nodeIpAddress);
       } catch (Exception e) {
         try {
+          RayLog.core.error("[error] at StateStoreProxyImpl getAddressInfo", e);          
           TimeUnit.MILLISECONDS.sleep(1000);
         } catch (InterruptedException ie) {
           RayLog.core.error("error at StateStoreProxyImpl getAddressInfo", e);
@@ -100,13 +101,13 @@ public class StateStoreProxyImpl implements StateStoreProxy {
    *        The hash contains the following：
    *        "deleted" : 0/1
    *        "ray_client_id"
-   *        "nodeIpAddress"
+   *        "node_ip_address"
    *        "client_type" : plasma_manager/local_scheduler
    *        "store_socket_name"(op)
    *        "manager_socket_name"(op)
    *        "local_scheduler_socket_name"(op)
    */
-  public List<AddressInfo> getAddressInfoHelper(final String nodeIpAddress) throws Exception {
+  public List<AddressInfo> getAddressInfoHelper(final String node_ip_address) throws Exception {
     if (this.rayKvStore == null) {
       throw new Exception("no redis client when use getAddressInfoHelper");
     }
@@ -114,8 +115,8 @@ public class StateStoreProxyImpl implements StateStoreProxy {
 
     Set<byte[]> cks = rayKvStore.keys("CL:*".getBytes());
     byte[] key;
-    List<Map<byte[], byte[]>> plasmaManager = new ArrayList<>();
-    List<Map<byte[], byte[]>> localScheduler = new ArrayList<>();
+    List<Map<byte[], byte[]>> plasma_manager = new ArrayList<>();
+    List<Map<byte[], byte[]>> local_scheduler = new ArrayList<>();
     for (byte[] ck : cks) {
       key = ck;
       Map<byte[], byte[]> info = rayKvStore.hgetAll(key);
@@ -129,53 +130,57 @@ public class StateStoreProxyImpl implements StateStoreProxy {
 
       if (!info.containsKey("ray_client_id".getBytes())) {
         throw new Exception("no ray_client_id in any client");
-      } else if (!info.containsKey("nodeIpAddress".getBytes())) {
-        throw new Exception("no nodeIpAddress in any client");
+      } else if (!info.containsKey("node_ip_address".getBytes())) {
+        throw new Exception("no node_ip_address in any client");
       } else if (!info.containsKey("client_type".getBytes())) {
         throw new Exception("no client_type in any client");
       }
 
-      if (charsetDecode(info.get("nodeIpAddress".getBytes()), "US-ASCII")
-          .equals(nodeIpAddress)) {
+      RayLog.core.error("node_ip_address in redis:" +
+        charsetDecode(info.get("node_ip_address".getBytes()), "US-ASCII"));
+      RayLog.core.error("node ip address:" + node_ip_address);
+
+      if (charsetDecode(info.get("node_ip_address".getBytes()), "US-ASCII")
+          .equals(node_ip_address)) {
         String clientType = charsetDecode(info.get("client_type".getBytes()), "US-ASCII");
-        if (clientType.equals("plasmaManager")) {
-          plasmaManager.add(info);
-        } else if (clientType.equals("localScheduler")) {
-          localScheduler.add(info);
+        if (clientType.equals("plasma_manager")) {
+          plasma_manager.add(info);
+        } else if (clientType.equals("local_scheduler")) {
+          local_scheduler.add(info);
         }
       }
     }
 
-    if (plasmaManager.size() < 1 || localScheduler.size() < 1) {
-      throw new Exception("no plasmaManager or localScheduler");
-    } else if (plasmaManager.size() != localScheduler.size()) {
-      throw new Exception("plasmaManager number not Equal localScheduler number");
+    if (plasma_manager.size() < 1 || local_scheduler.size() < 1) {
+      throw new Exception("no plasma_manager or local_scheduler");
+    } else if (plasma_manager.size() != local_scheduler.size()) {
+      throw new Exception("plasma_manager number not Equal local_scheduler number");
     }
 
-    for (int i = 0; i < plasmaManager.size(); i++) {
+    for (int i = 0; i < plasma_manager.size(); i++) {
       AddressInfo si = new AddressInfo();
-      si.storeName = charsetDecode(plasmaManager.get(i).get("store_socket_name".getBytes()),
+      si.storeName = charsetDecode(plasma_manager.get(i).get("store_socket_name".getBytes()),
           "US-ASCII");
-      si.managerName = charsetDecode(plasmaManager.get(i).get("manager_socket_name".getBytes()),
+      si.managerName = charsetDecode(plasma_manager.get(i).get("manager_socket_name".getBytes()),
           "US-ASCII");
 
-      byte[] rpc = plasmaManager.get(i).get("manager_rpc_name".getBytes());
+      byte[] rpc = plasma_manager.get(i).get("manager_rpc_name".getBytes());
       if (rpc != null) {
         si.managerRpcAddr = charsetDecode(rpc, "US-ASCII");
       }
 
-      rpc = plasmaManager.get(i).get("store_rpc_name".getBytes());
+      rpc = plasma_manager.get(i).get("store_rpc_name".getBytes());
       if (rpc != null) {
         si.storeRpcAddr = charsetDecode(rpc, "US-ASCII");
       }
 
-      String managerAddr = charsetDecode(plasmaManager.get(i).get("manager_address".getBytes()),
+      String managerAddr = charsetDecode(plasma_manager.get(i).get("manager_address".getBytes()),
           "US-ASCII");
       si.managerPort = Integer.parseInt(managerAddr.split(":")[1]);
       si.schedulerName = charsetDecode(
-          localScheduler.get(i).get("local_scheduler_socket_name".getBytes()), "US-ASCII");
+          local_scheduler.get(i).get("local_scheduler_socket_name".getBytes()), "US-ASCII");
 
-      rpc = localScheduler.get(i).get("local_scheduler_rpc_name".getBytes());
+      rpc = local_scheduler.get(i).get("local_scheduler_rpc_name".getBytes());
       if (rpc != null) {
         si.schedulerRpcAddr = charsetDecode(rpc, "US-ASCII");
       }

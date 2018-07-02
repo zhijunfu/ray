@@ -2,6 +2,7 @@ package org.ray.runner.worker;
 
 import org.ray.core.RayRuntime;
 import org.ray.core.model.WorkerMode;
+import org.ray.util.logger.RayLog;
 
 /**
  * default worker implementation.
@@ -16,6 +17,9 @@ public class DefaultWorker {
   //
   public static void main(String[] args) {
     try {
+      
+      new Exception().printStackTrace();
+
       RayRuntime.init(args);
       assert RayRuntime.getParams().worker_mode == WorkerMode.WORKER;
       RayRuntime.getInstance().loop();

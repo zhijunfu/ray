@@ -16,6 +16,9 @@ public class DefaultDriver {
   public static void main(String[] args) {
     try {
       RayRuntime.init(args);
+
+      new Exception().printStackTrace();
+      
       assert RayRuntime.getParams().worker_mode == WorkerMode.DRIVER;
 
       String driverClass = RayRuntime.configReader

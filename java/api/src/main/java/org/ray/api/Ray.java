@@ -22,6 +22,19 @@ public final class Ray extends Rpc {
     }
   }
 
+  /** 
+   * initialize the current worker, the single-box cluster, or a node in ray cluster.
+  */
+  // TODO: fixme: currently this would call into RayRuntime::init(String[] args), which only
+  // accepts --config and --overwrite. This is actually a limited subset of all arguments
+  // supported by Ray java, as a lot of supported args are only valid when used for
+  // starting ray on a node, instead of when a task is submitted here.
+  public static void init(String[] args) {
+    if (impl == null) {
+      impl = RayConnector.run(args);
+    }
+  }
+
   /**
    * Put obj into object store.
    */
