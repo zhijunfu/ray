@@ -120,8 +120,8 @@ declare -a nativeBinaries=(
 
 declare -a nativeLibraries=(
     "./src/common/redis_module/libray_redis_module.so"
-    "./src/local_scheduler/liblocal_scheduler_library_java.dylib"
-    "./src/plasma/libplasma_java.dylib"
+    "./src/local_scheduler/liblocal_scheduler_library_java.*"
+    "./src/plasma/libplasma_java.*"
 )
 
 declare -a javaBinaries=(
