@@ -22,12 +22,6 @@ public final class Ray extends Rpc {
     }
   }
 
-  public static void init(String[] args) {
-    if (impl == null) {
-      impl = RayConnector.run(args);
-    }
-  }
-
   /**
    * Put obj into object store.
    */

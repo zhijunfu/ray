@@ -32,7 +32,7 @@ public class HelloWorld implements Serializable {
 
   public static void main(String[] args) throws Exception {
     try {
-      Ray.init(args);
+      Ray.init();
       String helloWorld = HelloWorld.sayHelloWorld();
       RayLog.rapp.info(helloWorld);
       assert helloWorld.equals("hello,world!");

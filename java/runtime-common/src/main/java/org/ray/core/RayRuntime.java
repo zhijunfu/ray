@@ -1,6 +1,5 @@
 package org.ray.core;
 
-import java.io.IOException;
 import java.io.Serializable;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
@@ -22,7 +21,6 @@ import org.ray.api.UniqueID;
 import org.ray.api.WaitResult;
 import org.ray.api.internal.RayFunc;
 import org.ray.core.model.RayParameters;
-import org.ray.core.model.AppSpec;
 import org.ray.spi.LocalSchedulerLink;
 import org.ray.spi.LocalSchedulerProxy;
 import org.ray.spi.ObjectStoreProxy;
@@ -34,7 +32,6 @@ import org.ray.util.exception.TaskExecutionException;
 import org.ray.util.logger.DynamicLog;
 import org.ray.util.logger.DynamicLogManager;
 import org.ray.util.logger.RayLog;
-import org.ray.util.FileUtil;
 
 /**
  * Core functionality to implement Ray APIs.
@@ -44,8 +41,6 @@ public abstract class RayRuntime implements RayApi {
   public static ConfigReader configReader;
   protected static RayRuntime ins = null;
   protected static RayParameters params = null;
-  protected static AppSpec appSpec = null;
-  protected static byte[] packageZip = null;
   private static boolean fromRayInit = false;
   protected Worker worker;
   protected LocalSchedulerProxy localSchedulerProxy;
@@ -70,24 +65,6 @@ public abstract class RayRuntime implements RayApi {
     return ins;
   }
 
-  // app level Ray.init()
-  // make it private so there is no direct usage but only from Ray.init
-  // This is different from the above in that this assumes that ray processes
-  // have already been started on this machine.
-  private static RayRuntime init(String[] args, boolean dummy) {
-    if (ins == null) {
-      try {
-        fromRayInit = true;
-        RayRuntime.initAppImpl(args);
-        fromRayInit = false;
-       } catch (Exception e) {
-        e.printStackTrace();
-        throw new RuntimeException("Ray.init(args) failed", e);
-       }
-    }
-    return ins;
-  }
-
   // engine level RayRuntime.init(xx, xx)
   // updateConfigStr is sth like section1.k1=v1;section2.k2=v2
   public static RayRuntime init(String configPath, String updateConfigStr) throws Exception {
@@ -108,15 +85,6 @@ public abstract class RayRuntime implements RayApi {
           "set the log output level(debug, info, warn, error)");
       DynamicLog.setLogLevel(loglevel);
       RayRuntime.params = new RayParameters(configReader);
-
-      if (params.redis_address.length() != 0 && fromRayInit) {
-        if (appSpec == null || appSpec.className == null || appSpec.packageName == null) {
-          throw new Exception(
-            "--package and --class must be specified on command line if redis-address is specified");
-        }
-        RayRuntime.packageZip = FileUtil.fileToBytes(appSpec.packageName);
-      }
-
       DynamicLogManager.init(params.max_java_log_file_num, params.max_java_log_file_size);
       ins = instantiate(params);
       assert (ins != null);
@@ -146,30 +114,6 @@ public abstract class RayRuntime implements RayApi {
     return init(config, updateConfig);
   }
 
-  // Internal helper function.
-  private static RayRuntime initAppImpl(String[] args) throws Exception {
-
-    List<String> remaining = new ArrayList<String>();
-    String packageName = null;
-    String className = null;
-    for (String arg : args) {
-      if (arg.startsWith("--package=")) {
-        packageName = arg.substring("--package=".length());
-      } else if (arg.startsWith("--class=")) {
-        className = arg.substring("--class=".length());
-      } else {
-        remaining.add(arg);
-      }
-    }
-
-    RayRuntime.appSpec = new AppSpec(packageName, className);
-
-    String remainingArgs[] = new String[remaining.size()];
-    remaining.toArray(remainingArgs);
-
-    return RayRuntime.init(remainingArgs);
-  }
-
   protected void init(
       LocalSchedulerLink slink,
       ObjectStoreLink plink,
@@ -184,28 +128,6 @@ public abstract class RayRuntime implements RayApi {
     localSchedulerProxy = new LocalSchedulerProxy(slink);
     objectStoreProxy = new ObjectStoreProxy(plink);
     worker = new Worker(localSchedulerProxy, functions);
-
-    // Deal with app Ray.init() with parameters.
-    RegisterApp(remoteFunctionManager);
-  }
-
-  protected void RegisterApp(RemoteFunctionManager functionManager) {
-    if (params.redis_address.length() == 0 || appSpec == null) {
-      return;
-    }
-
-    String packageName = appSpec.packageName.substring(
-      appSpec.packageName.lastIndexOf('/') + 1,
-      appSpec.packageName.lastIndexOf('.'));
-
-      UniqueID resourceId = functionManager.registerResource(packageZip);
-      RayLog.rapp.debug(
-          "registerResource " + resourceId + " for package " + packageName + " done");
-
-      // register app
-      UniqueID driver_id = params.driver_id;
-      functionManager.registerApp(driver_id, resourceId);
-      RayLog.rapp.debug("registerApp " + driver_id + " for resouorce " + resourceId + " done");
   }
 
   private static RayRuntime instantiate(RayParameters params) {

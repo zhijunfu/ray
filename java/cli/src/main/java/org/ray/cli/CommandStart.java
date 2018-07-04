@@ -15,7 +15,7 @@ public class CommandStart {
   @Parameter(names = "--work", description = "start the work node including local scheduler, plasma and worker")
   public boolean work;
 
-  @Parameter(names = "--config", description = "the config file of raya")
+  @Parameter(names = "--config", description = "the config file of ray")
   public String config = "";
 
   @Parameter(names = "--overwrite", description = "the overwrite items of config")

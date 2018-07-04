@@ -5,15 +5,29 @@ import java.io.File;
 import java.io.IOException;
 import java.util.HashSet;
 import java.util.List;
+import java.util.ArrayList;
+import net.lingala.zip4j.core.ZipFile;
+import net.lingala.zip4j.exception.ZipException;
+import org.ray.api.UniqueID;
 import org.ray.cli.CommandStart;
 import org.ray.cli.CommandStop;
+import org.ray.core.RayRuntime;
+import org.ray.core.model.RunMode;
 import org.ray.core.model.RayParameters;
 import org.ray.runner.RunInfo;
 import org.ray.runner.RunManager;
+import org.ray.runner.worker.DefaultDriver;
+import org.ray.spi.KeyValueStoreLink;
 import org.ray.spi.PathConfig;
+import org.ray.spi.RemoteFunctionManager;
+import org.ray.spi.StateStoreProxy;
+import org.ray.spi.impl.NativeRemoteFunctionManager;
+import org.ray.spi.impl.RedisClient;
+import org.ray.spi.impl.StateStoreProxyImpl;
 import org.ray.util.NetworkUtil;
 import org.ray.util.config.ConfigReader;
 import org.ray.util.logger.RayLog;
+import org.ray.util.FileUtil;
 
 /**
  * Ray command line interface
@@ -128,13 +142,153 @@ public class RayCli {
     }
   }
 
+  private static String[] buildRayRuntimeArgs(CommandSubmit cmdSubmit) {
+
+    if (cmdSubmit.redis_address == null) {
+      throw new RuntimeException(
+          "--redis-address must be specified to submit a job");      
+    }
+
+    List<String> argList = new ArrayList<String>();
+    String section = "ray.java.start.";
+    String overwrite = "--overwrite="
+      + section + "redis_address=" + cmdSubmit.redis_address + ";"
+      + section + "run_mode=" + "CLUSTER";
+
+    argList.add(overwrite);
+
+    if (cmdSubmit.config != null) {
+      String config = "--config=" + cmdSubmit.config;
+      argList.add(config);
+    }
+
+    String args[] = new String[argList.size()];
+    argList.toArray(args);
+
+    return args;
+  }
+ 
+  private static void submit(CommandSubmit cmdSubmit, String configPath) throws Exception {
+    ConfigReader config = new ConfigReader(configPath, "ray.java.start.deploy=true");
+    PathConfig paths = new PathConfig(config);
+    RayParameters params = new RayParameters(config);
+
+    params.redis_address = cmdSubmit.redis_address;
+    params.run_mode = RunMode.CLUSTER;
+
+
+    KeyValueStoreLink kvStore = new RedisClient();
+    kvStore.setAddr(cmdSubmit.redis_address);
+    StateStoreProxy stateStoreProxy = new StateStoreProxyImpl(kvStore);
+    //stateStoreProxy.setStore(kvStore);
+    stateStoreProxy.initializeGlobalState();
+
+    RemoteFunctionManager functionManager = new NativeRemoteFunctionManager(kvStore);
+
+    // Init ray runtime with --redis_address and --run_mode=CLUSTER set.
+    // RayRuntime.init(buildRayRuntimeArgs(cmdSubmit));
+
+    // RayParameters params = new RayParameters(config);
+    // params.redis_address = cmdSubmit.redis_address;
+    // params.run_mode = RunMode.CLUSTER;
+
+    // Register app to Redis. 
+    byte[] zip = FileUtil.fileToBytes(cmdSubmit.packageZip);
+
+    String packageName = cmdSubmit.packageZip.substring(
+      cmdSubmit.packageZip.lastIndexOf('/') + 1,
+      cmdSubmit.packageZip.lastIndexOf('.'));
+
+    //final RemoteFunctionManager functionManager = RayRuntime
+    //    .getInstance().getRemoteFunctionManager();
+
+    UniqueID resourceId = functionManager.registerResource(zip);
+    RayLog.rapp.debug(
+        "registerResource " + resourceId + " for package " + packageName + " done");
+
+    UniqueID appId = params.driver_id;
+    functionManager.registerApp(appId, resourceId);
+    RayLog.rapp.debug("registerApp " + appId + " for resouorce " + resourceId + " done");
+  
+    // Unzip the package file.
+    String appDir = "/tmp/" + cmdSubmit.className;
+    String extPath = appDir + "/" + packageName;
+    if (!FileUtil.createDir(extPath, false)) {
+      throw new RuntimeException("create dir " + extPath + " failed ");
+    }
+
+    ZipFile zipFile = new ZipFile(cmdSubmit.packageZip);
+    zipFile.extractAll(extPath);
+
+    // Build the args for driver process.
+    File originDirFile = new File(extPath);
+    File[] topFiles = originDirFile.listFiles();
+    String topDir = null;
+    for (File file : topFiles) {
+      if (file.isDirectory()) {
+        topDir = file.getName();
+      }
+    }
+    RayLog.rapp.debug("topDir of app classes: "+ topDir);
+    if (topDir == null) {
+      RayLog.rapp.error("Can't find topDir of app classes, the app directory " + appDir);
+      return;
+    }
+
+    String additionalClassPath = appDir + "/" + packageName  + "/" + topDir + "/*";
+    RayLog.rapp.debug("Find app class path  " + additionalClassPath);
+
+    // Start driver process.
+    //RunManager runManager = new RunManager(params, RayRuntime.getInstance().getPaths(),
+    //  RayRuntime.configReader);
+    RunManager runManager = new RunManager(params, paths, config);
+    Process proc = runManager.startDriver(
+      DefaultDriver.class.getName(),
+      cmdSubmit.redis_address,
+      appId,
+      appDir,
+      params.node_ip_address,
+      cmdSubmit.className,
+      additionalClassPath,
+      null);
+
+    if (null == proc) { 
+      RayLog.rapp.error(
+        "Create process for app " + packageName + " in local directory " + appDir
+            + " failed");
+      return;
+    }
+
+    RayLog.rapp
+    .info("Create app " + appDir + " for package " + packageName + " succeeded");
+  }
+
+  private static String getConfigPath(String config) throws Exception {
+    String configPath;
+
+    if (config != null && !config.equals("")) {
+      configPath = config;
+    } else {
+      configPath = System.getenv("RAY_CONFIG");
+      if (configPath == null) {
+        configPath = System.getProperty("ray.config");
+      }
+      if (configPath == null) {
+        throw new Exception("Please set config file path in env RAY_CONFIG or property ray.config");
+      }
+    }
+    return configPath;
+  }
+
   public static void main(String[] args) throws Exception {
 
     CommandStart cmdStart = new CommandStart();
     CommandStop cmdStop = new CommandStop();
+    CommandSubmit cmdSubmit = new CommandSubmit();
     JCommander rayCommander = JCommander.newBuilder().addObject(rayArgs)
         .addCommand("start", cmdStart)
         .addCommand("stop", cmdStop)
+        .addCommand("submit", cmdSubmit)
         .build();
     rayCommander.parse(args);
 
@@ -150,26 +304,19 @@ public class RayCli {
     }
 
     String configPath;
-    if (cmdStart.config != null && !cmdStart.config.equals("")) {
-      configPath = cmdStart.config;
-    } else {
-      configPath = System.getenv("RAY_CONFIG");
-      if (configPath == null) {
-        configPath = System.getProperty("ray.config");
-      }
-      if (configPath == null) {
-        throw new Exception("Please set config file path in env RAY_CONFIG or property ray.config");
-      }
-    }
-
     switch (cmd) {
       case "start": {
+        configPath = getConfigPath(cmdStart.config);
         ConfigReader config = new ConfigReader(configPath, cmdStart.overwrite);
         start(cmdStart, config);
       }
       break;
       case "stop":
         stop(cmdStop);
+        break;
+      case "submit":
+        configPath = getConfigPath(cmdSubmit.config);
+        submit(cmdSubmit, configPath);
         break;
       default:
         rayCommander.usage();

@@ -23,21 +23,4 @@ public class RayConnector {
       throw new Error("RayApi is not successfully initiated.");
     }
   }
-
-  public static RayApi run(String[] args) {
-    try {
-      if (args.length == 0) {
-        return run();
-      }
-
-      Method m = Class.forName(className).getDeclaredMethod("init", String[].class, boolean.class);
-      m.setAccessible(true);
-      RayApi api = (RayApi) m.invoke(null, args, true);
-      m.setAccessible(false);
-      return api;
-    } catch (ReflectiveOperationException | IllegalArgumentException | SecurityException e) {
-      RayLog.core.error("Load " + className + " class failed.", e);
-      throw new Error("RayApi is not successfully initiated.");
-    }
-  }
 }
