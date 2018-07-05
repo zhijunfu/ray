@@ -242,6 +242,7 @@ public class RayCli {
       appDir,
       params.node_ip_address,
       cmdSubmit.className,
+      cmdSubmit.classArgs,
       additionalClassPath,
       null);
 
