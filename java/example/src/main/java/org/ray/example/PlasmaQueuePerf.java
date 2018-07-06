@@ -26,18 +26,17 @@ public class PlasmaQueuePerf {
 
           Integer numOfItems = 100 * 1000;
           Integer queueSize = 200 * 1000 * 1000;
-/*
+
           RayLog.rapp.warn("plasma queue test started......");          
           RayActor<A> a = Ray.create(PlasmaQueuePerf.A.class);      
           Ray.call(A::f, a, numOfItems, queueSize);
           Thread.sleep(30 * 1000);
-*/
-
+/*
           RayLog.rapp.warn("plasma object test started......");   
           RayActor<AA> aa = Ray.create(PlasmaQueuePerf.AA.class);
           Ray.call(AA::f, aa, numOfItems);
           Thread.sleep(100 * 1000);
-
+*/
         } catch (Throwable t) {
           t.printStackTrace();
         } finally {

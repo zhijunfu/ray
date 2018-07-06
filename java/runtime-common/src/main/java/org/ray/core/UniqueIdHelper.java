@@ -133,6 +133,8 @@ public class UniqueIdHelper {
     setHasMultipleReturn(wbb, hasMultipleReturn ? 1 : 0);
     setIsReturn(wbb, isReturn ? 1 : 0);
     setWithinTaskIndex(wbb, index);
+
+    oid.reverse();
     return oid;
   }
 

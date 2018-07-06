@@ -40,6 +40,14 @@ public class UniqueID implements Serializable {
     }
   }
 
+  public void reverse() {
+    for (int i = 0, j = LENGTH-1; i < j ; i++, j--) {
+      byte tmp = id[i];
+      id[i] = id[j];
+      id[j] = tmp;
+    }
+  }
+
   public static UniqueID genNil() {
     byte[] b = new byte[LENGTH];
     for (int i = 0; i < b.length; i++) {
