@@ -190,7 +190,7 @@ ray::Status ObjectBufferPool::CreateQueue(
 
     const plasma::ObjectID plasma_id = ObjectID(object_id).to_plasma_id();
     std::shared_ptr<Buffer> data;
-    arrow::Status s = store_client_.CreateQueue(plasma_id, object_size, &data);
+    arrow::Status s = store_client_.CreateQueue(plasma_id, data_size, &data);
     return s.ok() ? ray::Status::OK() : ray::Status::IOError(s.message());
 }
 

@@ -2,12 +2,13 @@
 namespace ray.object_manager.protocol;
 
 enum MessageType:int {
-  ConnectClient = 1,
+  // TODO: fix me -- DisconnectClient is 6, we must not overlap with it.
+  ConnectClient = 10,
   PushRequest,
   PullRequest,
   PullObjectInfo,
   PushObjectInfo,
-  SubscribeQueueUpdates,
+  SubscribeQueue,
   PushQueueItem
 }
 

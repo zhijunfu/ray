@@ -88,7 +88,7 @@ void ObjectManager::StopIOService() {
 void ObjectManager::NotifyDirectoryObjectAdd(const ObjectInfoT &object_info) {
   ObjectID object_id = ObjectID::from_binary(object_info.object_id);
   local_objects_[object_id] = object_info;
-  if (object_is is queue) {
+  if (local_queues_.find(object_id) != local_queues_.end()) {
     // Don't report locally created queue object.
     return;
   }
@@ -172,7 +172,12 @@ ray::Status ObjectManager::Pull(const ObjectID &object_id, const ClientID &clien
 ray::Status ObjectManager::PullEstablishConnection(const ObjectID &object_id,
                                                    const ClientID &client_id) {
 
-  return EstablishSendConnection(object_id, client_id, PullSendRequest);
+  return EstablishSendConnection(
+      object_id, 
+      client_id, 
+      [this](const ObjectID &object_id, std::shared_ptr<SenderConnection> &conn) {
+        return PullSendRequest(object_id, conn);
+      });
 }
 
 ray::Status ObjectManager::EstablishSendConnection(const ObjectID &object_id,
@@ -192,7 +197,7 @@ ray::Status ObjectManager::EstablishSendConnection(const ObjectID &object_id,
   if (conn == nullptr) {
     status = object_directory_->GetInformation(
         client_id,
-        [this, object_id, client_id](const RemoteConnectionInfo &connection_info) {
+        [this, object_id, client_id, callback](const RemoteConnectionInfo &connection_info) {
           std::shared_ptr<SenderConnection> async_conn = CreateSenderConnection(
               ConnectionPool::ConnectionType::MESSAGE, connection_info);
           connection_pool_.RegisterSender(ConnectionPool::ConnectionType::MESSAGE,
@@ -564,6 +569,22 @@ void ObjectManager::ProcessClientMessage(std::shared_ptr<TcpClientConnection> &c
     ReceivePullRequest(conn, message);
     break;
   }
+  case static_cast<int64_t>(object_manager_protocol::MessageType::PullObjectInfo): {
+    ReceivePullObjectInfoRequest(conn, message);
+    break;
+  }
+  case static_cast<int64_t>(object_manager_protocol::MessageType::PushObjectInfo): {
+    ReceivePushObjectInfoRequest(conn, message);
+    break;
+  }
+  case static_cast<int64_t>(object_manager_protocol::MessageType::SubscribeQueue): {
+    ReceiveSubscribeQueueRequest(conn, message);
+    break;
+  }
+  case static_cast<int64_t>(object_manager_protocol::MessageType::PushQueueItem): {
+    ReceivePushQueueItemRequest(conn, message);
+    break;
+  }
   case static_cast<int64_t>(object_manager_protocol::MessageType::ConnectClient): {
     ConnectClient(conn, message);
     break;
@@ -571,22 +592,6 @@ void ObjectManager::ProcessClientMessage(std::shared_ptr<TcpClientConnection> &c
   case static_cast<int64_t>(protocol::MessageType::DisconnectClient): {
     // TODO(hme): Disconnect without depending on the node manager protocol.
     DisconnectClient(conn, message);
-    break;
-  }
-  case static_cast<int64_t>(protocol::MessageType::PullObjectInfoMessage): {
-    ReceivePullObjectInfoRequest(conn, message);
-    break;
-  }
-  case static_cast<int64_t>(protocol::MessageType::PushObjectInfoMessage): {
-    ReceivePushObjectInfoRequest(conn, message);
-    break;
-  }
-  case static_cast<int64_t>(protocol::MessageType::SubscribeQueueMessage): {
-    ReceiveSubscribeQueueRequest(conn, message);
-    break;
-  }
-  case static_cast<int64_t>(protocol::MessageType::PushQueueItemMessage): {
-    ReceivePushQueueItemRequest(conn, message);
     break;
   }  
   default: { RAY_LOG(FATAL) << "invalid request " << message_type; }
@@ -712,7 +717,7 @@ ray::Status ObjectManager::SubscribeQueue(const ObjectID &object_id,
         if (callbacks.empty()) {
           // NOTE that we only send PullObjectInfo request for the first queue subscription,
           // and upon receviing the PullObjectInfo reply we'll invoke all the callbacks for this object.
-          RAY_CHECK_OK(PullObjectInfo(object_id, client_id[0]));
+          RAY_CHECK_OK(PullObjectInfo(object_id, client_ids[0]));
         }
         pending_queue_subscription_callbacks_[object_id].push_back(callback);
 
@@ -731,6 +736,8 @@ ray::Status ObjectManager::SubscribeQueue(const ObjectID &object_id,
           //    callback for new local queue items.
           //
       }));
+
+  return ray::Status::OK();  
 }
 
 ray::Status ObjectManager::SubscribeQueueSendRequest(const ObjectID &object_id,
@@ -747,16 +754,6 @@ ray::Status ObjectManager::SubscribeQueueSendRequest(const ObjectID &object_id,
   return ray::Status::OK();
 }
 
-void ObjectManager::ReceivePullObjectInfoRequest(std::shared_ptr<TcpClientConnection> &conn,
-                                                 const uint8_t *message) {
-  // Serialize and push object to requesting client.
-  auto pr = flatbuffers::GetRoot<object_manager_protocol::PullObjectInfoMessage>(message);
-  ObjectID object_id = ObjectID::from_binary(pr->object_id()->str());
-  ClientID client_id = ClientID::from_binary(pr->client_id()->str());
-  ray::Status push_status = PushObjectInfo(object_id, client_id);
-  conn->ProcessMessages();
-}
-
 ray::Status ObjectManager::PullObjectInfo(const ObjectID &object_id, const ClientID &client_id) {
   // Check if object is already local.
   if (local_objects_.count(object_id) != 0) {
@@ -768,7 +765,12 @@ ray::Status ObjectManager::PullObjectInfo(const ObjectID &object_id, const Clien
     RAY_LOG(ERROR) << client_id_ << " attempted to pull an object from itself.";
     return ray::Status::Invalid("A node cannot pull an object from itself.");
   }
-  return EstablishSendConnection(object_id, client_id, PullObjectInfoSendRequest);
+  return EstablishSendConnection(
+      object_id,
+      client_id, 
+      [this](const ObjectID &object_id, std::shared_ptr<SenderConnection> &conn) {
+        return PullObjectInfoSendRequest(object_id, conn);
+      });
 };
 
 ray::Status ObjectManager::PullObjectInfoSendRequest(const ObjectID &object_id,
@@ -805,7 +807,12 @@ ray::Status ObjectManager::PushObjectInfo(const ObjectID &object_id, const Clien
     RAY_LOG(ERROR) << client_id_ << " attempted to push an object to itself.";
     return ray::Status::Invalid("A node cannot push an object to itself.");
   }
-  return EstablishSendConnection(object_id, client_id, PushObjectInfoSendRequest);
+  return EstablishSendConnection(
+      object_id, 
+      client_id, 
+      [this](const ObjectID &object_id, std::shared_ptr<SenderConnection> &conn) {
+        return PushObjectInfoSendRequest(object_id, conn);
+      });
 };
 
 ray::Status ObjectManager::PushObjectInfoSendRequest(const ObjectID &object_id,
@@ -821,7 +828,7 @@ ray::Status ObjectManager::PushObjectInfoSendRequest(const ObjectID &object_id,
       data_size, metadata_size);
   fbb.Finish(message);
   RAY_CHECK_OK(conn->WriteMessage(
-      static_cast<int64_t>(object_manager_protocol::MessageType::PushObjectInfoMessage),
+      static_cast<int64_t>(object_manager_protocol::MessageType::PushObjectInfo),
       fbb.GetSize(), fbb.GetBufferPointer()));
   RAY_CHECK_OK(
       connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::MESSAGE, conn));
@@ -833,7 +840,7 @@ void ObjectManager::ReceivePushObjectInfoRequest(std::shared_ptr<TcpClientConnec
   // Serialize.
   auto object_header =
       flatbuffers::GetRoot<object_manager_protocol::PushObjectInfoMessage>(message);
-  ClientID client_id = ClientID::from_binary(pr->client_id()->str());
+  ClientID client_id = ClientID::from_binary(object_header->client_id()->str());
   ObjectID object_id = ObjectID::from_binary(object_header->object_id()->str());
   uint64_t data_size = object_header->data_size();
   uint64_t metadata_size = object_header->metadata_size();
@@ -857,16 +864,17 @@ void ObjectManager::OnQueueObjectInfoAvailable(const ClientID &client_id,
   if (local_objects_.count(object_id) != 0) {
     // This should NOT happen -- but just in case.
     for (auto& callback : it->second) {
-      callback(ray::Status::OK());
+      callback(true);
     }
   }
 
   // 1. Create local queue (whose size is the same as remote queue).
+  local_queues_.insert(object_id);
   auto status = buffer_pool_.CreateQueue(object_id, data_size, metadata_size);
 
   // 2. Invoke the queue subscription callbacks.
   for (auto& callback : it->second) {
-    callback(status);
+    callback(status == status::OK());
   }
 
   // and remove these callbacks.
@@ -894,7 +902,12 @@ ray::Status ObjectManager::SubscribeQueueUpdates(const ObjectID &object_id,
     RAY_LOG(ERROR) << client_id_ << " attempted to push an object to itself.";
     return ray::Status::Invalid("A node cannot push an object to itself.");
   }
-  return EstablishSendConnection(object_id, client_id, SubscribeQueueSendRequest);
+  return EstablishSendConnection(
+      object_id, 
+      client_id, 
+      [this](const ObjectID &object_id, std::shared_ptr<SenderConnection> &conn) {
+        return SubscribeQueueSendRequest(object_id, conn);
+      });
 };
 
 ray::Status ObjectManager::SubscribeQueueSendRequest(const ObjectID &object_id,
@@ -904,7 +917,7 @@ ray::Status ObjectManager::SubscribeQueueSendRequest(const ObjectID &object_id,
       fbb, fbb.CreateString(client_id_.binary()), fbb.CreateString(object_id.binary()));
   fbb.Finish(message);
   RAY_CHECK_OK(conn->WriteMessage(
-      static_cast<int64_t>(object_manager_protocol::MessageType::SubscribeQueueUpdates),
+      static_cast<int64_t>(object_manager_protocol::MessageType::SubscribeQueue),
       fbb.GetSize(), fbb.GetBufferPointer()));
   RAY_CHECK_OK(
       connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::MESSAGE, conn));
@@ -914,7 +927,7 @@ ray::Status ObjectManager::SubscribeQueueSendRequest(const ObjectID &object_id,
 void ObjectManager::ReceiveSubscribeQueueRequest(std::shared_ptr<TcpClientConnection> &conn,
                                                  const uint8_t *message) {
   // Serialize and push object to requesting client.
-  auto pr = flatbuffers::GetRoot<object_manager_protocol::SubscribeQueueUpdates>(message);
+  auto pr = flatbuffers::GetRoot<object_manager_protocol::SubscribeQueueMessage>(message);
   ObjectID object_id = ObjectID::from_binary(pr->object_id()->str());
   ClientID client_id = ClientID::from_binary(pr->client_id()->str());
   
@@ -960,7 +973,7 @@ void ObjectManager::ReceiveSubscribeQueueRequest(std::shared_ptr<TcpClientConnec
         it->second.strands.emplace_back(strand);
 
         // connection, strand, buffer-pointer + queue_item_info
-        queue_notifications_.SubscribeQueueItemAdded(
+        queue_notification_.SubscribeQueueItemAdded(
           [this, &conn, &strand, buffer](const PlasmaQueueItemInfoT & queue_item_info){
             
             uint8_t* data = buffer + queue_item_info.data_offset;
