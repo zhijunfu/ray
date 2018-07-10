@@ -26,6 +26,7 @@
 #include "ray/object_manager/object_directory.h"
 #include "ray/object_manager/object_manager_client_connection.h"
 #include "ray/object_manager/object_store_notification_manager.h"
+#include "ray/object_manager/queue_item_notification_manager.h"
 
 namespace ray {
 
@@ -178,6 +179,8 @@ class ObjectManager : public ObjectManagerInterface {
   const ObjectManagerConfig config_;
   std::unique_ptr<ObjectDirectoryInterface> object_directory_;
   ObjectStoreNotificationManager store_notification_;
+  QueueItemNotificationManager queue_notifications_;
+
   ObjectBufferPool buffer_pool_;
 
   /// This runs on a thread pool dedicated to sending objects.
@@ -341,6 +344,25 @@ class ObjectManager : public ObjectManagerInterface {
                         const uint8_t *message);
   /// Handle Push task timeout.
   void HandlePushTaskTimeout(const ObjectID &object_id, const ClientID &client_id);
+
+  /// Callback for object location notifications.
+  using OnObjectInfoReceived = std::function<void(uint64_t data_size, uint64_t metadata_size)>;
+  std::unordered_map<ObjectID, std::vector<SubscribeQueueCallback>> pending_queue_subscription_callbacks_;
+
+  void OnQueueObjectInfoAvailable(ObjectID object_id);
+
+  struct QueueItemSenderData {
+      // This holds the reference for the buffer of the queue object.
+      std::shared_ptr<arrow::Buffer> data_buffer;
+      std::vector<boost::asio::io_service::strand> strands;
+  };
+
+  std::unordered_map<ObjectID, QueueItemSenderData> queue_senders_;
+
+  using QueueItemReceiverData = std::unordered_map<ClientID, boost::asio::io_service::strand>;
+
+  std::unordered_map<ObjectID, QueueItemReceiverData> queue_receivers_;
+
 };
 
 }  // namespace ray
