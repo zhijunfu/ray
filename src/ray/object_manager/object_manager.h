@@ -179,7 +179,7 @@ class ObjectManager : public ObjectManagerInterface {
   const ObjectManagerConfig config_;
   std::unique_ptr<ObjectDirectoryInterface> object_directory_;
   ObjectStoreNotificationManager store_notification_;
-  QueueItemNotificationManager queue_notifications_;
+  QueueItemNotificationManager queue_notification_;
 
   ObjectBufferPool buffer_pool_;
 
@@ -345,6 +345,58 @@ class ObjectManager : public ObjectManagerInterface {
   /// Handle Push task timeout.
   void HandlePushTaskTimeout(const ObjectID &object_id, const ClientID &client_id);
 
+
+  // Pull object info.
+  ray::Status PullObjectInfo(const ObjectID &object_id, const ClientID &client_id);
+
+  ray::Status PullObjectInfoSendRequest(const ObjectID &object_id,
+                                        std::shared_ptr<SenderConnection> &conn);
+  void ReceivePullObjectInfoRequest(std::shared_ptr<TcpClientConnection> &conn,
+                                    const uint8_t *message);
+
+  // Push object info.
+  ray::Status PushObjectInfo(const ObjectID &object_id, const ClientID &client_id);
+
+  ray::Status PushObjectInfoSendRequest(const ObjectID &object_id,
+                                        std::shared_ptr<SenderConnection> &conn);
+
+  void ReceivePushObjectInfoRequest(std::shared_ptr<TcpClientConnection> &conn,
+                                    const uint8_t *message);
+
+
+  void OnQueueObjectInfoAvailable(const ClientID &client_id,
+                                               const ObjectID &object_id,
+                                               uint64_t data_size, 
+                                               uint64_t metadata_size);
+  
+  // Subscribe queue updates.
+  ray::Status SubscribeQueueUpdates(const ObjectID &object_id, 
+                                    const ClientID &client_id);
+
+
+  ray::Status SubscribeQueueSendRequest(const ObjectID &object_id,
+                                        std::shared_ptr<SenderConnection> &conn);
+
+  void ReceiveSubscribeQueueRequest(std::shared_ptr<TcpClientConnection> &conn,
+                                                 const uint8_t *message);
+
+
+  ray::Status SendQueueItem(const ObjectID &object_id,
+                                         uint64_t seq_id,
+                                         uint8_t* data,
+                                         uint64_t data_size,
+                                         std::shared_ptr<SenderConnection> &conn);
+
+  void ReceivePushQueueItemRequest(std::shared_ptr<TcpClientConnection> &conn,
+                                       const uint8_t *message);                                          
+
+  ray::Status ReceiveQueueItem(const ObjectID &object_id,
+                                         uint64_t seq_id,
+                                         uint64_t data_size,
+                                         std::shared_ptr<SenderConnection> &conn);
+
+
+
   /// Callback for object location notifications.
   using OnObjectInfoReceived = std::function<void(uint64_t data_size, uint64_t metadata_size)>;
   std::unordered_map<ObjectID, std::vector<SubscribeQueueCallback>> pending_queue_subscription_callbacks_;
@@ -362,6 +414,8 @@ class ObjectManager : public ObjectManagerInterface {
   using QueueItemReceiverData = std::unordered_map<ClientID, boost::asio::io_service::strand>;
 
   std::unordered_map<ObjectID, QueueItemReceiverData> queue_receivers_;
+
+  std::unordered_set<ObjectID> local_queues_;
 
 };
 
