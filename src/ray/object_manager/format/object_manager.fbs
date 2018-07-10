@@ -6,7 +6,9 @@ enum MessageType:int {
   PushRequest,
   PullRequest,
   PullObjectInfo,
-  PushObjectInfo
+  PushObjectInfo,
+  SubscribeQueueUpdates,
+  PushQueueItem
 }
 
 table PushRequestMessage {
@@ -42,10 +44,28 @@ table PullObjectInfoMessage {
 }
 
 table PushObjectInfoMessage {
+  // ID of the requesting client.
+  client_id: string;
   // The object ID being transferred.
   object_id: string;
   // The total size of the object + metadata.
   data_size: ulong;
   // The metadata size.
   metadata_size: ulong;
+}
+
+table SubscribeQueueMessage {
+  // ID of the requesting client.
+  client_id: string;  
+  // The object ID of the subscribed queue.
+  object_id: string;  
+}
+
+table PushQueueItemMessage {
+  // The object ID being transferred.
+  object_id: string;
+  // Sequence ID for the queue item.
+  seq_id: ulong;
+  // Size of queue item.
+  data_size: ulong;
 }

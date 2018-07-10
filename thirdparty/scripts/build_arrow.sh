@@ -54,7 +54,7 @@ if [[ ! -d $TP_DIR/../python/ray/pyarrow_files/pyarrow || \
 
     if [[ ! -d $TP_DIR/build/arrow ]]; then
       #git clone https://github.com/apache/arrow.git "$TP_DIR/build/arrow"
-      git clone -b plasma-queue-ray https://github.com/eric-jj/arrow.git "$TP_DIR/build/arrow"
+      git clone -b plasma-queue-raylet https://github.com/eric-jj/arrow.git "$TP_DIR/build/arrow"
     fi
 
     pushd $TP_DIR/build/arrow
