@@ -567,7 +567,7 @@ void NodeManager::ProcessClientMessage(
         [client](bool success) {
           flatbuffers::FlatBufferBuilder fbb;
           flatbuffers::Offset<protocol::SubscribeQueueReply> sub_reply =
-            protocol::CreateSubscribeQueueReply(fbb, to_flatbuf(fbb, success));
+            protocol::CreateSubscribeQueueReply(fbb, success);
           fbb.Finish(sub_reply);
           RAY_CHECK_OK(
               client->WriteMessage(static_cast<int64_t>(protocol::MessageType::SubscribeQueueReply),

@@ -742,20 +742,6 @@ ray::Status ObjectManager::SubscribeQueue(const ObjectID &object_id,
   return ray::Status::OK();  
 }
 
-ray::Status ObjectManager::SubscribeQueueSendRequest(const ObjectID &object_id,
-                                                     std::shared_ptr<SenderConnection> &conn) {
-  flatbuffers::FlatBufferBuilder fbb;
-  auto message = object_manager_protocol::CreatePullObjectInfoMessage(
-      fbb, fbb.CreateString(client_id_.binary()), fbb.CreateString(object_id.binary()));
-  fbb.Finish(message);
-  RAY_CHECK_OK(conn->WriteMessage(
-      static_cast<int64_t>(object_manager_protocol::MessageType::PullObjectInfo),
-      fbb.GetSize(), fbb.GetBufferPointer()));
-  RAY_CHECK_OK(
-      connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::MESSAGE, conn));
-  return ray::Status::OK();
-}
-
 ray::Status ObjectManager::PullObjectInfo(const ObjectID &object_id, const ClientID &client_id) {
   // Check if object is already local.
   if (local_objects_.count(object_id) != 0) {
@@ -876,20 +862,19 @@ void ObjectManager::OnQueueObjectInfoAvailable(const ClientID &client_id,
 
   // 2. Invoke the queue subscription callbacks.
   for (auto& callback : it->second) {
-    callback(status == status::OK());
+    callback(status.ok());
   }
 
   // and remove these callbacks.
   pending_queue_subscription_callbacks_.erase(it);
 
   // save the receiver connection.
-  boost::asio::io_service::strand strand(receive_service_);
-  queue_receivers_[object_id][client_id] = std::move(strand);
+  queue_receivers_[object_id][client_id] = std::make_shared<asio::io_service::strand>(receive_service_);
 
   // 3. Subscribe remote queue to make local queue in-sync with remote.
   // Only do this if CreateQueue above succeeds.
   if (status.ok()) {
-    SubscribeQueueUpdates(object_id, client_id);
+    RAY_CHECK_OK(SubscribeQueueUpdates(object_id, client_id));
   }
 }
 
@@ -937,7 +922,7 @@ void ObjectManager::ReceiveSubscribeQueueRequest(std::shared_ptr<TcpClientConnec
   // Subscribe for updates (new queue items) from local queue, and sync updates to remote OM.
   Status status = object_directory_->GetInformation(
       client_id,
-      [this, &object_buffers, &object_id, client_id](const RemoteConnectionInfo &connection_info) {
+      [this, &object_id, &client_id](const RemoteConnectionInfo &connection_info) {
         
         // Setup a dedicated connection to the client id.
         ray::Status status;
@@ -950,19 +935,18 @@ void ObjectManager::ReceiveSubscribeQueueRequest(std::shared_ptr<TcpClientConnec
         }
 
         // The information need to be recorded...
-        uint8_t *buffer = nullptr;
+        const uint8_t *buffer = nullptr;
 
         auto it = queue_senders_.find(object_id);
         if (it == queue_senders_.end()) {
           // Get buffer pointer for the queue object.
-          std::vector<plasma::ObjectBuffer> object_buffers;
+          plasma::ObjectBuffer object_buffer;
           // TODO: what if this fails?
-          ARROW_CHECK_OK(buffer_pool_.PlasmaClient.Get({object_id}, 0, &object_buffers));
-          ARROW_CHECK_OK(object_buffers.size() == 1);
+          RAY_CHECK_OK(buffer_pool_.GetQueue({object_id}, 0, &object_buffer));
 
           QueueItemSenderData senderData;
-          senderData.data_buffer = object_buffers[0].data;
-          queue_senders_[object] = senderData;
+          senderData.data_buffer = object_buffer.data;
+          queue_senders_[object_id] = senderData;
 
           it = queue_senders_.find(object_id);
           buffer = senderData.data_buffer->data();
@@ -970,20 +954,20 @@ void ObjectManager::ReceiveSubscribeQueueRequest(std::shared_ptr<TcpClientConnec
           buffer = it->second.data_buffer->data();
         }
 
-
-        boost::asio::io_service::strand strand(send_service_);
+        auto strand = std::make_shared<asio::io_service::strand>(send_service_);
         it->second.strands.emplace_back(strand);
 
         // connection, strand, buffer-pointer + queue_item_info
         queue_notification_.SubscribeQueueItemAdded(
+          object_id, 
           [this, &conn, &strand, buffer](const PlasmaQueueItemInfoT & queue_item_info){
             
-            uint8_t* data = buffer + queue_item_info.data_offset;
-            const ObjectID &object_id = queue_item_info.object_id;
+            const uint8_t* data = buffer + queue_item_info.data_offset;
+            const ObjectID &object_id = ObjectID::from_binary(queue_item_info.object_id);
             uint64_t seq_id = queue_item_info.seq_id;
             uint64_t data_size = queue_item_info.data_size;
-            strand.post([this, &object_id, seq_id, data, data_size, &conn]() {
-              RAY_CHECK_OK(SendQueueItem(object_id, seq_id, data, data_size, conn));
+            strand->post([this, &object_id, seq_id, data, data_size, conn]() {
+              RAY_CHECK_OK(SendQueueItem(object_id, seq_id, data, data_size, *conn));
             });
 
           });
@@ -998,24 +982,16 @@ void ObjectManager::ReceiveSubscribeQueueRequest(std::shared_ptr<TcpClientConnec
 
 ray::Status ObjectManager::SendQueueItem(const ObjectID &object_id,
                                          uint64_t seq_id,
-                                         uint8_t* data,
+                                         const uint8_t* data,
                                          uint64_t data_size,
-                                         std::shared_ptr<SenderConnection> &conn) {
-  std::pair<const ObjectBufferPool::ChunkInfo &, ray::Status> chunk_status =
-      buffer_pool_.GetChunk(object_id, data_size, metadata_size, chunk_index);
-  ObjectBufferPool::ChunkInfo chunk_info = chunk_status.first;
-
-  // Fail on status not okay. The object is local, and there is
-  // no other anticipated error here.
-  RAY_CHECK_OK(chunk_status.second);
-
+                                         SenderConnection &conn) {
   // Send PushQueueItem message.
   flatbuffers::FlatBufferBuilder fbb;
   auto message = object_manager_protocol::CreatePushQueueItemMessage(
       fbb, fbb.CreateString(object_id.binary()), seq_id, data_size);
   fbb.Finish(message);
-  ray::Status status = conn->WriteMessage(
-      static_cast<int64_t>(object_manager_protocol::MessageType::PushQueueItemRequest),
+  ray::Status status = conn.WriteMessage(
+      static_cast<int64_t>(object_manager_protocol::MessageType::PushQueueItem),
       fbb.GetSize(), fbb.GetBufferPointer());
   RAY_CHECK_OK(status);
 
@@ -1023,9 +999,8 @@ ray::Status ObjectManager::SendQueueItem(const ObjectID &object_id,
   boost::system::error_code ec;
   std::vector<asio::const_buffer> buffer;
   buffer.push_back(asio::buffer(data, data_size));
-  conn->WriteBuffer(buffer, ec);
+  conn.WriteBuffer(buffer, ec);
 
-  ray::Status status = ray::Status::OK();
   if (ec.value() != 0) {
     // Push failed. Deal with partial objects on the receiving end.
     // TODO(hme): Try to invoke disconnect on sender connection, then remove it.
@@ -1037,7 +1012,7 @@ ray::Status ObjectManager::SendQueueItem(const ObjectID &object_id,
 }
 
 void ObjectManager::ReceivePushQueueItemRequest(std::shared_ptr<TcpClientConnection> &conn,
-                                       const uint8_t *message) {
+                                                const uint8_t *message) {
   // Serialize.
   auto header =
       flatbuffers::GetRoot<object_manager_protocol::PushQueueItemMessage>(message);
@@ -1046,35 +1021,35 @@ void ObjectManager::ReceivePushQueueItemRequest(std::shared_ptr<TcpClientConnect
   uint64_t data_size = header->data_size();
 
   // TODO: check if it's valid.
-  auto &strand = queue_receivers_[object_id][client_id];
-  strand.post([this, object_id, seq_id, data_size, conn]() {
-    ReceiveQueueItem(object_id, seq_id, data_size, conn);
+  auto &strand = queue_receivers_[object_id][conn->GetClientID()];
+  strand->post([this, object_id, seq_id, data_size, conn]() {
+    RAY_CHECK_OK(ReceiveQueueItem(object_id, seq_id, data_size, *conn));
   });
 }
 
 ray::Status ObjectManager::ReceiveQueueItem(const ObjectID &object_id,
                                          uint64_t seq_id,
                                          uint64_t data_size,
-                                         std::shared_ptr<SenderConnection> &conn) {
+                                         TcpClientConnection &conn) {
 
   // TODO: we should support putting the seqid from sender to receiver during CreateQueueItem,
   // instead of letting receiver to create its own seqid.
   std::shared_ptr<Buffer> data;
-  auto status = buffer_pool_->PlasmaClient()->CreateQueueItem(
+  auto status = buffer_pool_.CreateQueueItem(
     object_id, data_size, &data, seq_id);
-  ARROW_CHECK_OK(status);
+  RAY_CHECK_OK(status);
 
   std::vector<boost::asio::mutable_buffer> buffer;
-  buffer.push_back(asio::buffer(data, data_size));
+  buffer.push_back(asio::buffer(data->mutable_data(), data_size));
   boost::system::error_code ec;
   conn.ReadBuffer(buffer, ec);
   // TODO: fix the error case.
-  ARROW_CHECK_OK(ec.value() == 0);
+  RAY_CHECK(ec.value() == 0);
 
   // TODO: refactor this. SealQueueItem shouldn't take so many params.
-  status = buffer_pool_->PlasmaClient()->SealQueueItem(
-    object_id, seq_id, buffer);
-  ARROW_CHECK_OK(status);
+  status = buffer_pool_.SealQueueItem(
+    object_id, seq_id, data);
+  RAY_CHECK_OK(status);
 
   return status;
 }  
