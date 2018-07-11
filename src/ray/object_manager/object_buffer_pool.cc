@@ -194,4 +194,36 @@ ray::Status ObjectBufferPool::CreateQueue(
     return s.ok() ? ray::Status::OK() : ray::Status::IOError(s.message());
 }
 
+ray::Status ObjectBufferPool::GetQueue(const ObjectID &object_id, int64_t timeout_ms, 
+    plasma::ObjectBuffer* object_buffer) {  
+  std::lock_guard<std::mutex> lock(pool_mutex_);
+  
+  const plasma::ObjectID plasma_id = ObjectID(object_id).to_plasma_id();
+  std::vector<plasma::ObjectBuffer> object_buffers;
+  arrow::Status s = store_client_.Get({plasma_id}, timeout_ms, &object_buffers);
+  if (object_buffers.size() > 0) {
+    *object_buffer = object_buffers[0];
+  }
+  return s.ok() ? ray::Status::OK() : ray::Status::IOError(s.message());
+
+}
+
+ray::Status ObjectBufferPool::CreateQueueItem(const ObjectID& object_id, uint32_t data_size,
+    std::shared_ptr<Buffer>* data, uint64_t& seq_id) {
+  std::lock_guard<std::mutex> lock(pool_mutex_);
+
+  const plasma::ObjectID plasma_id = ObjectID(object_id).to_plasma_id();
+  arrow::Status s = store_client_.CreateQueueItem(plasma_id, data_size, data, seq_id);
+  return s.ok() ? ray::Status::OK() : ray::Status::IOError(s.message());
+}
+
+ray::Status ObjectBufferPool::SealQueueItem(const ObjectID& object_id, 
+    uint64_t seq_id, std::shared_ptr<Buffer> data) {
+  std::lock_guard<std::mutex> lock(pool_mutex_);
+
+  const plasma::ObjectID plasma_id = ObjectID(object_id).to_plasma_id();
+  arrow::Status s = store_client_.SealQueueItem(plasma_id, seq_id, data);
+  return s.ok() ? ray::Status::OK() : ray::Status::IOError(s.message());
+}
+
 }  // namespace ray

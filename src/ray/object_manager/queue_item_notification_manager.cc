@@ -51,7 +51,6 @@ void QueueItemNotificationManager::ProcessQueueItemNotification(
   }
 
   const auto &item_info = flatbuffers::GetRoot<PlasmaQueueItemInfo>(notification_.data());
-  const auto &object_id = from_flatbuf(*item_info->object_id());
   // NOTE: right now we don't support notification of queue item deletion yet.
 
   PlasmaQueueItemInfoT result;
@@ -62,14 +61,15 @@ void QueueItemNotificationManager::ProcessQueueItemNotification(
 }
 
 void QueueItemNotificationManager::ProcessQueueItemAdd(const PlasmaQueueItemInfoT &item_info) {
-  for (auto &handler : add_handlers_[item_info.object_id]) {
+  const auto &object_id = ObjectID::from_binary(item_info.object_id);
+  for (auto &handler : add_handlers_[object_id]) {
     handler(item_info);
   }
 }
 
 void QueueItemNotificationManager::ProcessQueueItemRemove(const ObjectID &object_id, uint64_t seq_id) {
-  for (auto &handler : rem_handlers_) {
-    handler(object_id);
+  for (auto &handler : rem_handlers_[object_id]) {
+    handler(object_id, seq_id);
   }
 }
 

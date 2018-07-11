@@ -383,9 +383,9 @@ class ObjectManager : public ObjectManagerInterface {
 
   ray::Status SendQueueItem(const ObjectID &object_id,
                                          uint64_t seq_id,
-                                         uint8_t* data,
+                                         const uint8_t* data,
                                          uint64_t data_size,
-                                         std::shared_ptr<SenderConnection> &conn);
+                                         SenderConnection &conn);
 
   void ReceivePushQueueItemRequest(std::shared_ptr<TcpClientConnection> &conn,
                                        const uint8_t *message);                                          
@@ -393,7 +393,7 @@ class ObjectManager : public ObjectManagerInterface {
   ray::Status ReceiveQueueItem(const ObjectID &object_id,
                                          uint64_t seq_id,
                                          uint64_t data_size,
-                                         std::shared_ptr<SenderConnection> &conn);
+                                         TcpClientConnection &conn);
 
 
 
@@ -406,12 +406,12 @@ class ObjectManager : public ObjectManagerInterface {
   struct QueueItemSenderData {
       // This holds the reference for the buffer of the queue object.
       std::shared_ptr<arrow::Buffer> data_buffer;
-      std::vector<boost::asio::io_service::strand> strands;
+      std::vector<std::shared_ptr<boost::asio::io_service::strand>> strands;
   };
 
   std::unordered_map<ObjectID, QueueItemSenderData> queue_senders_;
 
-  using QueueItemReceiverData = std::unordered_map<ClientID, boost::asio::io_service::strand>;
+  using QueueItemReceiverData = std::unordered_map<ClientID, std::shared_ptr<boost::asio::io_service::strand>>;
 
   std::unordered_map<ObjectID, QueueItemReceiverData> queue_receivers_;
 
