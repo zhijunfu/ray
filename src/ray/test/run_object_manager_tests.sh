@@ -42,11 +42,14 @@ sleep 1s
 ${REDIS_SERVER} --loglevel warning ${LOAD_MODULE_ARGS} --port 6379 &
 sleep 1s
 # Run tests.
-$CORE_DIR/src/ray/object_manager/object_manager_stress_test $STORE_EXEC
+#$CORE_DIR/src/ray/object_manager/object_manager_stress_test $STORE_EXEC
+#sleep 1s
+#$CORE_DIR/src/ray/object_manager/object_manager_test $STORE_EXEC
+#sleep 1s
+$CORE_DIR/src/ray/object_manager/object_manager_plasma_queue_test $STORE_EXEC
 sleep 1s
-$CORE_DIR/src/ray/object_manager/object_manager_test $STORE_EXEC
-$REDIS_DIR/redis-cli -p 6379 shutdown
-sleep 1s
-
 # Include raylet integration test once it's ready.
-# $CORE_DIR/src/ray/raylet/object_manager_integration_test $STORE_EXEC
+#$CORE_DIR/src/ray/raylet/object_manager_integration_test $STORE_EXEC
+#sleep 1s
+
+$REDIS_DIR/redis-cli -p 6379 shutdown
