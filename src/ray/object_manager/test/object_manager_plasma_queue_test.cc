@@ -57,17 +57,12 @@ class MockServer {
   }
 
   void HandleAcceptObjectManager(const boost::system::error_code &error) {
-    ////// 
-    RAY_LOG(INFO) << "HandleAcceptObjectManager() ";
-
-
     ClientHandler<boost::asio::ip::tcp> client_handler =
         [this](TcpClientConnection &client) { object_manager_.ProcessNewClient(client); };
     MessageHandler<boost::asio::ip::tcp> message_handler = [this](
         std::shared_ptr<TcpClientConnection> client, int64_t message_type,
         const uint8_t *message) {
       
-      RAY_LOG(INFO) << "calling ProcessClientMessage() " ;
       object_manager_.ProcessClientMessage(client, message_type, message);
     };
     // Accept a new local client and dispatch it to the node manager.
@@ -86,7 +81,7 @@ class MockServer {
 
 class TestObjectManagerBase : public ::testing::Test {
  public:
-  TestObjectManagerBase() {}
+  TestObjectManagerBase() : work(test_service) {}
 
   std::string StartStore(const std::string &id) {
     std::string store_id = "/tmp/store";
@@ -144,6 +139,8 @@ class TestObjectManagerBase : public ::testing::Test {
     om_config_2.push_timeout_ms = push_timeout_ms;
     server2.reset(new MockServer(main_service, om_config_2, gcs_client_2));
 
+    test_thread = std::thread(&TestObjectManagerBase::StartTestService, this);
+
     // connect to stores.
     ARROW_CHECK_OK(client1.Connect(store_id_1, "", plasma::kPlasmaDefaultReleaseDelay));
     ARROW_CHECK_OK(client2.Connect(store_id_2, "", plasma::kPlasmaDefaultReleaseDelay));
@@ -157,10 +154,15 @@ class TestObjectManagerBase : public ::testing::Test {
     this->server1.reset();
     this->server2.reset();
 
+    test_service.stop();
+    test_thread.join();
+
     StopStore(store_id_1);
     StopStore(store_id_2);
   }
 
+  void StartTestService() { test_service.run(); }
+  
   ObjectID WriteDataToClient(plasma::PlasmaClient &client, int64_t data_size) {
     return WriteDataToClient(client, data_size, ObjectID::from_random());
   }
@@ -184,6 +186,10 @@ class TestObjectManagerBase : public ::testing::Test {
  protected:
   std::thread p;
   boost::asio::io_service main_service;
+  boost::asio::io_service test_service;
+  boost::asio::io_service::work work;
+  std::thread test_thread;
+  std::thread thread2;
   std::shared_ptr<gcs::AsyncGcsClient> gcs_client_1;
   std::shared_ptr<gcs::AsyncGcsClient> gcs_client_2;
   std::unique_ptr<MockServer> server1;
@@ -238,8 +244,6 @@ class TestObjectManager : public TestObjectManagerBase {
   plasma::ObjectID object_id = plasma::ObjectID::from_random();
   std::vector<plasma::ObjectBuffer> object_buffers;
 
-  RAY_LOG(INFO) << "object_id: " << object_id;
-
   int64_t queue_size = 1024 * 1024;
   std::shared_ptr<Buffer> data;
   ARROW_CHECK_OK(client1.CreateQueue(object_id, queue_size, &data));
@@ -249,8 +253,6 @@ class TestObjectManager : public TestObjectManagerBase {
     [this, object_id](
         const std::vector<ray::ObjectID> &found,
         const std::vector<ray::ObjectID> &remaining) {
-  
-  RAY_LOG(INFO) << "found object_id: " << found[0];
 
   RAY_CHECK(found.size() == 1 && remaining.empty());
   RAY_CHECK(found[0] == object_id); 
@@ -262,12 +264,9 @@ class TestObjectManager : public TestObjectManagerBase {
       RAY_CHECK(success);
       RAY_LOG(INFO) << "SubscribeQueue callback invoked: succeeded " << object_id;
 
-    timer.reset(new boost::asio::deadline_timer(main_service));
-    auto period = boost::posix_time::seconds(10);
-    timer->expires_from_now(period);
-    timer->async_wait([this, object_id](const boost::system::error_code &error) {
+      test_service.post([this, object_id]() {
 
-      RAY_LOG(INFO) << "Create a new thread for queue test " << object_id;  
+      RAY_LOG(INFO) << "Start plasma queue test " << object_id;  
       // Test that the second client can get the object.
       int notify_fd;
       bool has_object = false;
@@ -279,9 +278,9 @@ class TestObjectManager : public TestObjectManagerBase {
       // and subscribed to plasma manager for client1. otherwise if PushQueueItem()
       // is called before plasma manager subscription, wth current implmentation 
       // the item notification would not be pushed to client2 (will fix later).
-      sleep(5);
+      //sleep(5);
 
-      RAY_LOG(INFO) << "PushQueue started " << object_id;  
+      RAY_LOG(INFO) << "PushQueueItem started " << object_id;  
 
       std::vector<uint64_t> items;
       items.resize(10);
@@ -295,245 +294,27 @@ class TestObjectManager : public TestObjectManagerBase {
         ARROW_CHECK_OK(client1.PushQueueItem(object_id, data, data_size));
       }
 
-      auto count = items.size();
-      auto period = boost::posix_time::seconds(10);
-      timer->expires_from_now(period);
-      timer->async_wait([this, object_id, count](const boost::system::error_code &error) {
-      
-        RAY_LOG(INFO) << "ReceiveQueue started " << object_id;  
-        for (uint32_t i = 0; i < count; i++) {
-          uint8_t* buff = nullptr;
-          uint32_t buff_size = 0;
-          uint64_t seq_id = -1;
+      RAY_LOG(INFO) << "GetQueueItem started " << object_id;  
+      for (uint32_t i = 0; i < items.size(); i++) {
+        uint8_t* buff = nullptr;
+        uint32_t buff_size = 0;
+        uint64_t seq_id = -1;
 
-          ARROW_CHECK_OK(client2.GetQueueItem(object_id, buff, buff_size, seq_id));
-          RAY_CHECK(static_cast<uint32_t>(seq_id) == i + 1);
-          RAY_CHECK(buff_size == sizeof(uint64_t));
-          uint64_t value = *(uint64_t*)(buff);
+        ARROW_CHECK_OK(client2.GetQueueItem(object_id, buff, buff_size, seq_id));
+        RAY_CHECK(static_cast<uint32_t>(seq_id) == i + 1);
+        RAY_CHECK(buff_size == sizeof(uint64_t));
+        uint64_t value = *(uint64_t*)(buff);
+        RAY_CHECK(value == items[i]);
+      }
 
-          RAY_LOG(INFO) << "ReceiveQueue: received " << value << " expected " << i;  
-          RAY_CHECK(value == i);
-        }
-
-        RAY_LOG(INFO) << "Queue test done " << object_id;  
-        TestWaitComplete();
-      });
+      RAY_LOG(INFO) << "Plasma queue test done " << object_id;  
+      TestWaitComplete();
     });
 
     })); // SubscribeQueue
 
   })); // Wait
   
-  }
-
-  void TestNotifications() {
-    ray::Status status = ray::Status::OK();
-    status = server1->object_manager_.SubscribeObjAdded(
-        [this](const ObjectInfoT &object_info) {
-          object_added_handler_1(ObjectID::from_binary(object_info.object_id));
-          NotificationTestCompleteIfSatisfied();
-        });
-    RAY_CHECK_OK(status);
-    status = server2->object_manager_.SubscribeObjAdded(
-        [this](const ObjectInfoT &object_info) {
-          object_added_handler_2(ObjectID::from_binary(object_info.object_id));
-          NotificationTestCompleteIfSatisfied();
-        });
-    RAY_CHECK_OK(status);
-
-    uint data_size = 1000000;
-
-    // dummy_id is not local. The push function will timeout.
-    ObjectID dummy_id = ObjectID::from_random();
-    status = server1->object_manager_.Push(
-        dummy_id, gcs_client_2->client_table().GetLocalClientId());
-
-    created_object_id1 = ObjectID::from_random();
-    WriteDataToClient(client1, data_size, created_object_id1);
-    // Server1 holds Object1 so this Push call will success.
-    status = server1->object_manager_.Push(
-        created_object_id1, gcs_client_2->client_table().GetLocalClientId());
-
-    // This timer is used to guarantee that the Push function for dummy_id will timeout.
-    timer.reset(new boost::asio::deadline_timer(main_service));
-    auto period = boost::posix_time::milliseconds(push_timeout_ms + 10);
-    timer->expires_from_now(period);
-    created_object_id2 = ObjectID::from_random();
-    timer->async_wait([this, data_size](const boost::system::error_code &error) {
-      WriteDataToClient(client2, data_size, created_object_id2);
-    });
-  }
-
-  void NotificationTestCompleteIfSatisfied() {
-    uint num_expected_objects1 = 1;
-    uint num_expected_objects2 = 2;
-    if (v1.size() == num_expected_objects1 && v2.size() == num_expected_objects2) {
-      SubscribeObjectThenWait();
-    }
-  }
-
-  void SubscribeObjectThenWait() {
-    int data_size = 100;
-    // Test to ensure Wait works properly during an active subscription to the same
-    // object.
-    ObjectID object_1 = WriteDataToClient(client2, data_size);
-    ObjectID object_2 = WriteDataToClient(client2, data_size);
-    UniqueID sub_id = ray::ObjectID::from_random();
-
-    RAY_CHECK_OK(server1->object_manager_.object_directory_->SubscribeObjectLocations(
-        sub_id, object_1,
-        [this, sub_id, object_1, object_2](const std::vector<ray::ClientID> &,
-                                           const ray::ObjectID &object_id) {
-          TestWaitWhileSubscribed(sub_id, object_1, object_2);
-        }));
-  }
-
-  void TestWaitWhileSubscribed(UniqueID sub_id, ObjectID object_1, ObjectID object_2) {
-    int required_objects = 1;
-    int timeout_ms = 1000;
-
-    std::vector<ObjectID> object_ids = {object_1, object_2};
-    boost::posix_time::ptime start_time = boost::posix_time::second_clock::local_time();
-
-    UniqueID wait_id = UniqueID::from_random();
-
-    RAY_CHECK_OK(server1->object_manager_.AddWaitRequest(
-        wait_id, object_ids, timeout_ms, required_objects, false,
-        [this, sub_id, object_1, object_ids, start_time](
-            const std::vector<ray::ObjectID> &found,
-            const std::vector<ray::ObjectID> &remaining) {
-          int64_t elapsed = (boost::posix_time::second_clock::local_time() - start_time)
-                                .total_milliseconds();
-          RAY_LOG(DEBUG) << "elapsed " << elapsed;
-          RAY_LOG(DEBUG) << "found " << found.size();
-          RAY_LOG(DEBUG) << "remaining " << remaining.size();
-          RAY_CHECK(found.size() == 1);
-          // There's nothing more to test. A check will fail if unexpected behavior is
-          // triggered.
-          RAY_CHECK_OK(
-              server1->object_manager_.object_directory_->UnsubscribeObjectLocations(
-                  sub_id, object_1));
-          NextWaitTest();
-        }));
-
-    // Skip lookups and rely on Subscribe only to test subscribe interaction.
-    server1->object_manager_.SubscribeRemainingWaitObjects(wait_id);
-  }
-
-  void NextWaitTest() {
-    current_wait_test += 1;
-    switch (current_wait_test) {
-    case 0: {
-      // Ensure timeout_ms = 0 is handled correctly.
-      // Out of 5 objects, we expect 3 ready objects and 2 remaining objects.
-      TestWait(100, 5, 3, /*timeout_ms=*/0, false, false);
-    } break;
-    case 1: {
-      // Ensure timeout_ms = 1000 is handled correctly.
-      // Out of 5 objects, we expect 3 ready objects and 2 remaining objects.
-      TestWait(100, 5, 3, /*timeout_ms=*/1000, false, false);
-    } break;
-    case 2: {
-      // Generate objects locally to ensure local object code-path works properly.
-      // Out of 5 objects, we expect 3 ready objects and 2 remaining objects.
-      TestWait(100, 5, 3, 1000, false, /*test_local=*/true);
-    } break;
-    case 3: {
-      // Wait on an object that's never registered with GCS to ensure timeout works
-      // properly.
-      TestWait(100, /*num_objects=*/5, /*required_objects=*/6, 1000,
-               /*include_nonexistent=*/true, false);
-    } break;
-    case 4: {
-      // Ensure infinite time code-path works properly.
-      TestWait(100, 5, 5, /*timeout_ms=*/-1, false, false);
-    } break;
-    }
-  }
-
-  void TestWait(int data_size, int num_objects, uint64_t required_objects, int timeout_ms,
-                bool include_nonexistent, bool test_local) {
-    std::vector<ObjectID> object_ids;
-    for (int i = -1; ++i < num_objects;) {
-      ObjectID oid;
-      if (test_local) {
-        oid = WriteDataToClient(client1, data_size);
-      } else {
-        oid = WriteDataToClient(client2, data_size);
-      }
-      object_ids.push_back(oid);
-    }
-    if (include_nonexistent) {
-      num_objects += 1;
-      object_ids.push_back(ObjectID::from_random());
-    }
-    boost::posix_time::ptime start_time = boost::posix_time::second_clock::local_time();
-    RAY_CHECK_OK(server1->object_manager_.Wait(
-        object_ids, timeout_ms, required_objects, false,
-        [this, object_ids, num_objects, timeout_ms, required_objects, start_time](
-            const std::vector<ray::ObjectID> &found,
-            const std::vector<ray::ObjectID> &remaining) {
-          int64_t elapsed = (boost::posix_time::second_clock::local_time() - start_time)
-                                .total_milliseconds();
-          RAY_LOG(DEBUG) << "elapsed " << elapsed;
-          RAY_LOG(DEBUG) << "found " << found.size();
-          RAY_LOG(DEBUG) << "remaining " << remaining.size();
-
-          // Ensure object order is preserved for all invocations.
-          uint j = 0;
-          uint k = 0;
-          for (uint i = 0; i < object_ids.size(); ++i) {
-            ObjectID oid = object_ids[i];
-            // Make sure the object is in either the found vector or the remaining vector.
-            if (j < found.size() && found[j] == oid) {
-              j += 1;
-            }
-            if (k < remaining.size() && remaining[k] == oid) {
-              k += 1;
-            }
-          }
-          if (!found.empty()) {
-            ASSERT_EQ(j, found.size());
-          }
-          if (!remaining.empty()) {
-            ASSERT_EQ(k, remaining.size());
-          }
-
-          switch (current_wait_test) {
-          case 0: {
-            // Ensure timeout_ms = 0 returns expected number of found and remaining
-            // objects.
-            ASSERT_TRUE(found.size() <= required_objects);
-            ASSERT_TRUE(static_cast<int>(found.size() + remaining.size()) == num_objects);
-            NextWaitTest();
-          } break;
-          case 1: {
-            // Ensure lookup succeeds as expected when timeout_ms = 1000.
-            ASSERT_TRUE(found.size() >= required_objects);
-            ASSERT_TRUE(static_cast<int>(found.size() + remaining.size()) == num_objects);
-            NextWaitTest();
-          } break;
-          case 2: {
-            // Ensure lookup succeeds as expected when objects are local.
-            ASSERT_TRUE(found.size() >= required_objects);
-            ASSERT_TRUE(static_cast<int>(found.size() + remaining.size()) == num_objects);
-            NextWaitTest();
-          } break;
-          case 3: {
-            // Ensure lookup returns after timeout_ms elapses when one object doesn't
-            // exist.
-            ASSERT_TRUE(elapsed >= timeout_ms);
-            ASSERT_TRUE(static_cast<int>(found.size() + remaining.size()) == num_objects);
-            NextWaitTest();
-          } break;
-          case 4: {
-            // Ensure timeout_ms = -1 works properly.
-            ASSERT_TRUE(static_cast<int>(found.size()) == num_objects);
-            ASSERT_TRUE(remaining.size() == 0);
-            TestWaitComplete();
-          } break;
-          }
-        }));
   }
 
   void TestWaitComplete() { main_service.stop(); }
