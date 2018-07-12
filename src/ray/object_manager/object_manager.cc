@@ -980,9 +980,6 @@ ray::Status ObjectManager::SendQueueItem(const ObjectID &object_id,
                                          const uint8_t* data,
                                          uint64_t data_size,
                                          SenderConnection &conn) {
-
-  RAY_LOG(INFO) << "SendQueueItem: seq_id " << seq_id; 
-
   // Send PushQueueItem message.
   flatbuffers::FlatBufferBuilder fbb;
   auto message = object_manager_protocol::CreatePushQueueItemMessage(
@@ -1031,8 +1028,6 @@ ray::Status ObjectManager::ReceiveQueueItem(const ObjectID &object_id,
                                          uint64_t seq_id,
                                          uint64_t data_size,
                                          TcpClientConnection &conn) {
-
-  RAY_LOG(INFO) << "ReceiveQueueItem: seq_id " << seq_id; 
 
   // TODO: we should support putting the seqid from sender to receiver during CreateQueueItem,
   // instead of letting receiver to create its own seqid.
