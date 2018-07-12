@@ -57,11 +57,17 @@ class MockServer {
   }
 
   void HandleAcceptObjectManager(const boost::system::error_code &error) {
+    ////// 
+    RAY_LOG(INFO) << "HandleAcceptObjectManager() ";
+
+
     ClientHandler<boost::asio::ip::tcp> client_handler =
         [this](TcpClientConnection &client) { object_manager_.ProcessNewClient(client); };
     MessageHandler<boost::asio::ip::tcp> message_handler = [this](
         std::shared_ptr<TcpClientConnection> client, int64_t message_type,
         const uint8_t *message) {
+      
+      RAY_LOG(INFO) << "calling ProcessClientMessage() " ;
       object_manager_.ProcessClientMessage(client, message_type, message);
     };
     // Accept a new local client and dispatch it to the node manager.
@@ -232,17 +238,20 @@ class TestObjectManager : public TestObjectManagerBase {
   plasma::ObjectID object_id = plasma::ObjectID::from_random();
   std::vector<plasma::ObjectBuffer> object_buffers;
 
+  RAY_LOG(INFO) << "object_id: " << object_id;
+
   int64_t queue_size = 1024 * 1024;
   std::shared_ptr<Buffer> data;
   ARROW_CHECK_OK(client1.CreateQueue(object_id, queue_size, &data));
-
 
   RAY_CHECK_OK(server2->object_manager_.Wait(
     {object_id}, -1, 1, false,
     [this, object_id](
         const std::vector<ray::ObjectID> &found,
         const std::vector<ray::ObjectID> &remaining) {
-    
+  
+  RAY_LOG(INFO) << "found object_id: " << found[0];
+
   RAY_CHECK(found.size() == 1 && remaining.empty());
   RAY_CHECK(found[0] == object_id); 
   
@@ -253,6 +262,12 @@ class TestObjectManager : public TestObjectManagerBase {
       RAY_CHECK(success);
       RAY_LOG(INFO) << "SubscribeQueue callback invoked: succeeded " << object_id;
 
+    timer.reset(new boost::asio::deadline_timer(main_service));
+    auto period = boost::posix_time::seconds(10);
+    timer->expires_from_now(period);
+    timer->async_wait([this, object_id](const boost::system::error_code &error) {
+
+      RAY_LOG(INFO) << "Create a new thread for queue test " << object_id;  
       // Test that the second client can get the object.
       int notify_fd;
       bool has_object = false;
@@ -266,6 +281,8 @@ class TestObjectManager : public TestObjectManagerBase {
       // the item notification would not be pushed to client2 (will fix later).
       sleep(5);
 
+      RAY_LOG(INFO) << "PushQueue started " << object_id;  
+
       std::vector<uint64_t> items;
       items.resize(10);
       for (uint32_t i = 0; i < items.size(); i++) {
@@ -278,24 +295,35 @@ class TestObjectManager : public TestObjectManagerBase {
         ARROW_CHECK_OK(client1.PushQueueItem(object_id, data, data_size));
       }
 
-      for (uint32_t i = 0; i < items.size(); i++) {
-        uint8_t* buff = nullptr;
-        uint32_t buff_size = 0;
-        uint64_t seq_id = -1;
-
-        ARROW_CHECK_OK(client2.GetQueueItem(object_id, buff, buff_size, seq_id));
-        RAY_CHECK(static_cast<uint32_t>(seq_id) == i + 1);
-        RAY_CHECK(buff_size == sizeof(uint64_t));
-        uint64_t value = *(uint64_t*)(buff);
-        RAY_CHECK(value == items[i]);
-      }
-
-      TestWaitComplete();
+      auto count = items.size();
+      auto period = boost::posix_time::seconds(10);
+      timer->expires_from_now(period);
+      timer->async_wait([this, object_id, count](const boost::system::error_code &error) {
       
+        RAY_LOG(INFO) << "ReceiveQueue started " << object_id;  
+        for (uint32_t i = 0; i < count; i++) {
+          uint8_t* buff = nullptr;
+          uint32_t buff_size = 0;
+          uint64_t seq_id = -1;
+
+          ARROW_CHECK_OK(client2.GetQueueItem(object_id, buff, buff_size, seq_id));
+          RAY_CHECK(static_cast<uint32_t>(seq_id) == i + 1);
+          RAY_CHECK(buff_size == sizeof(uint64_t));
+          uint64_t value = *(uint64_t*)(buff);
+
+          RAY_LOG(INFO) << "ReceiveQueue: received " << value << " expected " << i;  
+          RAY_CHECK(value == i);
+        }
+
+        RAY_LOG(INFO) << "Queue test done " << object_id;  
+        TestWaitComplete();
+      });
+    });
+
     })); // SubscribeQueue
 
   })); // Wait
-
+  
   }
 
   void TestNotifications() {

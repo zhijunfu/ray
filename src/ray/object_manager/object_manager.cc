@@ -880,10 +880,6 @@ void ObjectManager::OnQueueObjectInfoAvailable(const ClientID &client_id,
 
 ray::Status ObjectManager::SubscribeQueueUpdates(const ObjectID &object_id, 
                                                  const ClientID &client_id) {
-  // Check if object is already local.
-  if (local_objects_.count(object_id) == 0) {
-    return ray::Status::OK();
-  }
   // Check if we're pulling from self.
   if (client_id == client_id_) {
     RAY_LOG(ERROR) << client_id_ << " attempted to push an object to itself.";
@@ -960,15 +956,15 @@ void ObjectManager::ReceiveSubscribeQueueRequest(std::shared_ptr<TcpClientConnec
         // connection, strand, buffer-pointer + queue_item_info
         queue_notification_.SubscribeQueueItemAdded(
           object_id, 
-          [this, &conn, &strand, buffer](const PlasmaQueueItemInfoT & queue_item_info){
-            
+/////          [this, conn, &strand, buffer](const PlasmaQueueItemInfoT & queue_item_info){
+          [this, conn, buffer](const PlasmaQueueItemInfoT & queue_item_info){
             const uint8_t* data = buffer + queue_item_info.data_offset;
             const ObjectID &object_id = ObjectID::from_binary(queue_item_info.object_id);
             uint64_t seq_id = queue_item_info.seq_id;
             uint64_t data_size = queue_item_info.data_size;
-            strand->post([this, &object_id, seq_id, data, data_size, conn]() {
+//////            strand->post([this, &object_id, seq_id, data, data_size, conn]() {
               RAY_CHECK_OK(SendQueueItem(object_id, seq_id, data, data_size, *conn));
-            });
+//////            });
 
           });
       },
@@ -985,6 +981,9 @@ ray::Status ObjectManager::SendQueueItem(const ObjectID &object_id,
                                          const uint8_t* data,
                                          uint64_t data_size,
                                          SenderConnection &conn) {
+
+  RAY_LOG(INFO) << "SendQueueItem: seq_id " << seq_id; 
+
   // Send PushQueueItem message.
   flatbuffers::FlatBufferBuilder fbb;
   auto message = object_manager_protocol::CreatePushQueueItemMessage(
@@ -1021,16 +1020,20 @@ void ObjectManager::ReceivePushQueueItemRequest(std::shared_ptr<TcpClientConnect
   uint64_t data_size = header->data_size();
 
   // TODO: check if it's valid.
-  auto &strand = queue_receivers_[object_id][conn->GetClientID()];
-  strand->post([this, object_id, seq_id, data_size, conn]() {
+/////  auto &strand = queue_receivers_[object_id][conn->GetClientID()];
+/////  strand->post([this, object_id, seq_id, data_size, conn]() {
     RAY_CHECK_OK(ReceiveQueueItem(object_id, seq_id, data_size, *conn));
-  });
+/////  });
+
+  conn->ProcessMessages();
 }
 
 ray::Status ObjectManager::ReceiveQueueItem(const ObjectID &object_id,
                                          uint64_t seq_id,
                                          uint64_t data_size,
                                          TcpClientConnection &conn) {
+
+  RAY_LOG(INFO) << "ReceiveQueueItem: seq_id " << seq_id; 
 
   // TODO: we should support putting the seqid from sender to receiver during CreateQueueItem,
   // instead of letting receiver to create its own seqid.
