@@ -956,15 +956,14 @@ void ObjectManager::ReceiveSubscribeQueueRequest(std::shared_ptr<TcpClientConnec
         // connection, strand, buffer-pointer + queue_item_info
         queue_notification_.SubscribeQueueItemAdded(
           object_id, 
-/////          [this, conn, &strand, buffer](const PlasmaQueueItemInfoT & queue_item_info){
-          [this, conn, buffer](const PlasmaQueueItemInfoT & queue_item_info){
+          [this, conn, strand, buffer](const PlasmaQueueItemInfoT & queue_item_info){
             const uint8_t* data = buffer + queue_item_info.data_offset;
             const ObjectID &object_id = ObjectID::from_binary(queue_item_info.object_id);
             uint64_t seq_id = queue_item_info.seq_id;
             uint64_t data_size = queue_item_info.data_size;
-//////            strand->post([this, &object_id, seq_id, data, data_size, conn]() {
+            strand->post([this, object_id, seq_id, data, data_size, conn]() {
               RAY_CHECK_OK(SendQueueItem(object_id, seq_id, data, data_size, *conn));
-//////            });
+            });
 
           });
       },
@@ -1020,12 +1019,12 @@ void ObjectManager::ReceivePushQueueItemRequest(std::shared_ptr<TcpClientConnect
   uint64_t data_size = header->data_size();
 
   // TODO: check if it's valid.
-/////  auto &strand = queue_receivers_[object_id][conn->GetClientID()];
-/////  strand->post([this, object_id, seq_id, data_size, conn]() {
+  auto strand = queue_receivers_[object_id][conn->GetClientID()];
+  //
+  strand->post([this, object_id, seq_id, data_size, conn]() {
     RAY_CHECK_OK(ReceiveQueueItem(object_id, seq_id, data_size, *conn));
-/////  });
-
-  conn->ProcessMessages();
+    conn->ProcessMessages();
+  });
 }
 
 ray::Status ObjectManager::ReceiveQueueItem(const ObjectID &object_id,
