@@ -57,18 +57,30 @@ class TestObjectManagerBase : public ::testing::Test {
     ObjectManagerConfig om_config_1;
     om_config_1.store_socket_name = store_sock_1;
     om_config_1.push_timeout_ms = 10000;
+    om_config_1.pull_timeout_ms = 20;
+    om_config_1.max_sends = 2;
+    om_config_1.max_receives = 2;
+    om_config_1.object_chunk_size = 100000000;
+
+    std::string raylet_sock1 = "/tmp/raylet_1";
     server1.reset(new ray::raylet::Raylet(
-        main_service, "raylet_1", "0.0.0.0", "127.0.0.1", 6379,
-        GetNodeManagerConfig("raylet_1", store_sock_1), om_config_1, gcs_client_1));
+        main_service, raylet_sock1, "127.0.0.1", "127.0.0.1", 6379,
+        GetNodeManagerConfig(raylet_sock1, store_sock_1), om_config_1, gcs_client_1));
 
     // start second server
     gcs_client_2 = std::shared_ptr<gcs::AsyncGcsClient>(new gcs::AsyncGcsClient());
     ObjectManagerConfig om_config_2;
     om_config_2.store_socket_name = store_sock_2;
     om_config_2.push_timeout_ms = 10000;
+    om_config_2.pull_timeout_ms = 20;
+    om_config_2.max_sends = 2;
+    om_config_2.max_receives = 2;
+    om_config_2.object_chunk_size = 100000000;
+
+    std::string raylet_sock2 = "/tmp/raylet_2";
     server2.reset(new ray::raylet::Raylet(
-        main_service, "raylet_2", "0.0.0.0", "127.0.0.1", 6379,
-        GetNodeManagerConfig("raylet_2", store_sock_2), om_config_2, gcs_client_2));
+        main_service, raylet_sock2, "127.0.0.1", "127.0.0.1", 6379,
+        GetNodeManagerConfig(raylet_sock2, store_sock_2), om_config_2, gcs_client_2));
 
     // connect to stores.
     ARROW_CHECK_OK(client1.Connect(store_sock_1, "", plasma::kPlasmaDefaultReleaseDelay));
@@ -83,14 +95,12 @@ class TestObjectManagerBase : public ::testing::Test {
     this->server1.reset();
     this->server2.reset();
 
-    int s = system("killall plasma_store &");
-    ASSERT_TRUE(!s);
-
-    std::string cmd_str = test_executable.substr(0, test_executable.find_last_of("/"));
-    s = system(("rm " + cmd_str + "/raylet_1").c_str());
-    ASSERT_TRUE(!s);
-    s = system(("rm " + cmd_str + "/raylet_2").c_str());
-    ASSERT_TRUE(!s);
+    int s = system("killall plasma_store");
+    //ASSERT_TRUE(!s);
+    s = system("rm /tmp/raylet_1");
+    //ASSERT_TRUE(!s);
+    s = system("rm /tmp/raylet_2");
+    //ASSERT_TRUE(!s);
   }
 
   ObjectID WriteDataToClient(plasma::PlasmaClient &client, int64_t data_size) {
@@ -123,7 +133,8 @@ class TestObjectManagerIntegration : public TestObjectManagerBase {
  public:
   uint num_expected_objects;
 
-  int num_connected_clients = 0;
+  int num_connected_clients_client1 = 0;
+  int num_connected_clients_client2 = 0;
 
   ClientID client_id_1;
   ClientID client_id_2;
@@ -135,12 +146,28 @@ class TestObjectManagerIntegration : public TestObjectManagerBase {
         gcs::AsyncGcsClient *client, const ClientID &id, const ClientTableDataT &data) {
       ClientID parsed_id = ClientID::from_binary(data.client_id);
       if (parsed_id == client_id_1 || parsed_id == client_id_2) {
-        num_connected_clients += 1;
+        num_connected_clients_client1 += 1;
       }
-      if (num_connected_clients == 2) {
-        StartTests();
+      if (num_connected_clients_client1 == 2) {
+        StartTestsIfSatisfied();
       }
     });
+    gcs_client_2->client_table().RegisterClientAddedCallback([this](
+        gcs::AsyncGcsClient *client, const ClientID &id, const ClientTableDataT &data) {
+      ClientID parsed_id = ClientID::from_binary(data.client_id);
+      if (parsed_id == client_id_1 || parsed_id == client_id_2) {
+        num_connected_clients_client2 += 1;
+      }
+      if (num_connected_clients_client2 == 2) {
+        StartTestsIfSatisfied();
+      }
+    });    
+  }
+
+  void StartTestsIfSatisfied() {
+    if (num_connected_clients_client1 == 2 && num_connected_clients_client2 == 2) {
+      StartTests();
+    }
   }
 
   void StartTests() {

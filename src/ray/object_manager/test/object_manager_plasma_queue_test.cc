@@ -241,83 +241,83 @@ class TestObjectManager : public TestObjectManagerBase {
 
   void TestPlasmaQueue() {
 
-  plasma::ObjectID object_id = plasma::ObjectID::from_random();
-  std::vector<plasma::ObjectBuffer> object_buffers;
+    plasma::ObjectID object_id = plasma::ObjectID::from_random();
+    std::vector<plasma::ObjectBuffer> object_buffers;
 
-  int64_t queue_size = 1024 * 1024;
-  std::shared_ptr<Buffer> data;
-  ARROW_CHECK_OK(client1.CreateQueue(object_id, queue_size, &data));
+    int64_t queue_size = 1024 * 1024;
+    std::shared_ptr<Buffer> data;
+    ARROW_CHECK_OK(client1.CreateQueue(object_id, queue_size, &data));
 
-  RAY_CHECK_OK(server2->object_manager_.Wait(
-    {object_id}, -1, 1, false,
-    [this, object_id](
-        const std::vector<ray::ObjectID> &found,
-        const std::vector<ray::ObjectID> &remaining) {
+    RAY_CHECK_OK(server2->object_manager_.Wait(
+      {object_id}, -1, 1, false,
+      [this, object_id](
+          const std::vector<ray::ObjectID> &found,
+          const std::vector<ray::ObjectID> &remaining) {
 
-  RAY_CHECK(found.size() == 1 && remaining.empty());
-  RAY_CHECK(found[0] == object_id); 
-  
-  RAY_CHECK_OK(server2->object_manager_.SubscribeQueue(
-    object_id,
-    [this, object_id](bool success) {
+      RAY_CHECK(found.size() == 1 && remaining.empty());
+      RAY_CHECK(found[0] == object_id); 
+      
+      RAY_CHECK_OK(server2->object_manager_.SubscribeQueue(
+        object_id,
+        [this, object_id](bool success) {
+        
+          RAY_CHECK(success);
+          RAY_LOG(INFO) << "SubscribeQueue callback invoked: succeeded " << object_id;
+
+          test_service.post([this, object_id]() {
+
+          RAY_LOG(INFO) << "Start plasma queue test " << object_id;  
+          // Test that the second client can get the object.
+          int notify_fd;
+          bool has_object = false;
+          ARROW_CHECK_OK(client2.GetQueue(object_id, -1, &notify_fd));
+          ARROW_CHECK_OK(client2.Contains(object_id, &has_object));
+          RAY_CHECK(has_object);
+
+          // Sleep to make sure the plasma manager for client2 has create local queue
+          // and subscribed to plasma manager for client1. otherwise if PushQueueItem()
+          // is called before plasma manager subscription, wth current implmentation 
+          // the item notification would not be pushed to client2 (will fix later).
+          //sleep(5);
+
+          RAY_LOG(INFO) << "PushQueueItem started " << object_id;  
+
+          std::vector<uint64_t> items;
+          items.resize(10);
+          for (uint32_t i = 0; i < items.size(); i++) {
+            items[i] = i;
+          }
+
+          for (uint32_t i = 0; i < items.size(); i++) {
+            uint8_t* data = reinterpret_cast<uint8_t*>(&items[i]);
+            uint32_t data_size = static_cast<uint32_t>(sizeof(uint64_t));
+            ARROW_CHECK_OK(client1.PushQueueItem(object_id, data, data_size));
+          }
+
+          RAY_LOG(INFO) << "GetQueueItem started " << object_id;  
+          for (uint32_t i = 0; i < items.size(); i++) {
+            uint8_t* buff = nullptr;
+            uint32_t buff_size = 0;
+            uint64_t seq_id = -1;
+
+            ARROW_CHECK_OK(client2.GetQueueItem(object_id, buff, buff_size, seq_id));
+            RAY_CHECK(static_cast<uint32_t>(seq_id) == i + 1);
+            RAY_CHECK(buff_size == sizeof(uint64_t));
+            uint64_t value = *(uint64_t*)(buff);
+            RAY_CHECK(value == items[i]);
+          }
+
+          RAY_LOG(INFO) << "Plasma queue test done " << object_id;  
+          TestComplete();
+        });
+
+      })); // SubscribeQueue
+
+    })); // Wait
     
-      RAY_CHECK(success);
-      RAY_LOG(INFO) << "SubscribeQueue callback invoked: succeeded " << object_id;
-
-      test_service.post([this, object_id]() {
-
-      RAY_LOG(INFO) << "Start plasma queue test " << object_id;  
-      // Test that the second client can get the object.
-      int notify_fd;
-      bool has_object = false;
-      ARROW_CHECK_OK(client2.GetQueue(object_id, -1, &notify_fd));
-      ARROW_CHECK_OK(client2.Contains(object_id, &has_object));
-      RAY_CHECK(has_object);
-
-      // Sleep to make sure the plasma manager for client2 has create local queue
-      // and subscribed to plasma manager for client1. otherwise if PushQueueItem()
-      // is called before plasma manager subscription, wth current implmentation 
-      // the item notification would not be pushed to client2 (will fix later).
-      //sleep(5);
-
-      RAY_LOG(INFO) << "PushQueueItem started " << object_id;  
-
-      std::vector<uint64_t> items;
-      items.resize(10);
-      for (uint32_t i = 0; i < items.size(); i++) {
-        items[i] = i;
-      }
-
-      for (uint32_t i = 0; i < items.size(); i++) {
-        uint8_t* data = reinterpret_cast<uint8_t*>(&items[i]);
-        uint32_t data_size = static_cast<uint32_t>(sizeof(uint64_t));
-        ARROW_CHECK_OK(client1.PushQueueItem(object_id, data, data_size));
-      }
-
-      RAY_LOG(INFO) << "GetQueueItem started " << object_id;  
-      for (uint32_t i = 0; i < items.size(); i++) {
-        uint8_t* buff = nullptr;
-        uint32_t buff_size = 0;
-        uint64_t seq_id = -1;
-
-        ARROW_CHECK_OK(client2.GetQueueItem(object_id, buff, buff_size, seq_id));
-        RAY_CHECK(static_cast<uint32_t>(seq_id) == i + 1);
-        RAY_CHECK(buff_size == sizeof(uint64_t));
-        uint64_t value = *(uint64_t*)(buff);
-        RAY_CHECK(value == items[i]);
-      }
-
-      RAY_LOG(INFO) << "Plasma queue test done " << object_id;  
-      TestWaitComplete();
-    });
-
-    })); // SubscribeQueue
-
-  })); // Wait
-  
   }
 
-  void TestWaitComplete() { main_service.stop(); }
+  void TestComplete() { main_service.stop(); }
 
   void TestConnections() {
     RAY_LOG(DEBUG) << "\n"
