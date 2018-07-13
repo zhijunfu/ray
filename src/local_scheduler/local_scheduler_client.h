@@ -211,4 +211,8 @@ std::pair<std::vector<ObjectID>, std::vector<ObjectID>> local_scheduler_wait(
     int64_t timeout_milliseconds,
     bool wait_local);
 
+bool local_scheduler_subscribe_queue(
+    LocalSchedulerConnection *conn,
+    ObjectID object_id);
+
 #endif
