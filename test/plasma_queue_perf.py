@@ -7,6 +7,7 @@ from __future__ import print_function
 
 import ray
 import time
+import datetime
 
 ## Provider A and Receiver B not using plasma queue
 #@ray.remote
@@ -32,43 +33,49 @@ import time
 
 
 # Provider A and Receiver B using plasma queue
-@ray.remote(resources={'Resource1': 2})
+@ray.remote
 class A(object):
     def __init__(self):
         print("Actor A start...")
 
     def f(self):
-        qid = ray.create_queue()
+        num_of_items = 100 * 1000
+        qid = ray.create_queue(100 * 1000 * 1000)
         print("create_queue success, qid: " + str(qid))
         time.sleep(5)
-        b = B.remote(qid)
+        b = B.remote(qid, num_of_items)
         time.sleep(5)
         b.f.remote()
         time.sleep(5)
-        for i in range(10):
+        time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S:%f')
+        print("push_queue, start " + time_str)
+        for i in range(num_of_items):
             ray.push_queue(qid, i)
-            print("push_queue, val: " + str(i))
+        time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S:%f')
+        print("push_queue, end " + time_str)
         time.sleep(5)
 
 
-@ray.remote(resources={'Resource2': 4})
+@ray.remote
 class B(object):
-    def __init__(self, qid):
+    def __init__(self, qid, num_of_items):
         print("Actor B start...")
         self.qid = qid
+        self.num_of_items = num_of_items
         self.sum = 0
 
     def f(self):
-        for _ in range(10):
+        time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S:%f')
+        print("read_queue, start " + time_str)
+        for _ in range(self.num_of_items):
             val = ray.read_queue(self.qid)
-            self.sum += val
-            print("read_queue, val: " + str(val))
-
+        time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S:%f')
+        print("read_queue, end " + time_str)
     def get_sum(self):
         return self.sum
 
 
 if __name__ == "__main__":
-    ray.init(redis_address="172.17.0.3:6379")
+    ray.init()
     A.remote().f.remote()
-    time.sleep(20)
+    time.sleep(2000)

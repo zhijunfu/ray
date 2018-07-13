@@ -1797,7 +1797,8 @@ void process_message(event_loop *loop,
     process_status_request(conn, object_id);
   } break;
   case static_cast<int64_t>(CommonMessageType::DISCONNECT_CLIENT): {
-    RAY_LOG(DEBUG) << "Disconnecting client on fd " << client_sock;
+    RAY_LOG(DEBUG) << "[PlasmaManagerl] Disconnecting client on fd "
+                   << client_sock;
     event_loop_remove_file(loop, client_sock);
     ClientConnection_free(conn);
   } break;

@@ -183,4 +183,9 @@ public class Worker {
   public UniqueID[] getCurrentTaskReturnIDs() {
     return WorkerContext.currentTask().returnIds;
   }
+
+  public boolean isSubscribedPlasmaQueue(UniqueID qid) { return WorkerContext.isSubscribedPlasmaQueue(qid); }
+
+  public Long plasmaQueueReadingIndex(UniqueID qid) { return WorkerContext.plasmaQueueReadingIndex(qid); }
+
 }

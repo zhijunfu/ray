@@ -1,6 +1,7 @@
 package org.ray.spi;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import org.apache.arrow.plasma.ObjectStoreLink;
 import org.apache.commons.lang3.tuple.Pair;
@@ -11,6 +12,7 @@ import org.ray.api.WaitResult;
 import org.ray.core.Serializer;
 import org.ray.core.WorkerContext;
 import org.ray.util.exception.TaskExecutionException;
+import org.ray.util.logger.RayLog;
 
 /**
  * Object store proxy, which handles serialization and deserialization, and utilize a {@code
@@ -80,7 +82,47 @@ public class ObjectStoreProxy {
   }
 
   public void put(UniqueID id, Object obj, Object metadata) {
-    store.put(id.getBytes(), Serializer.encode(obj), Serializer.encode(metadata));
+    byte[] obj_data = Serializer.encode(obj);
+    byte[] meta_data = Serializer.encode(metadata);
+    RayLog.core.info("put " + id.toString() + " object size: "+ obj_data.length + " metadata size: " + meta_data.length);
+    store.put(id.getBytes(), obj_data, meta_data);
+    RayLog.core.info("put done " + id.toString());
+  }
+
+  public void createQueue(UniqueID id, int totalBytes) {
+    store.createQueue(id.getBytes(), totalBytes);
+  }
+
+  public void pushQueue(UniqueID qid, Object obj) {
+    store.pushQueue(qid.getBytes(), Serializer.encode(obj));
+  }
+
+  public void getQueue(UniqueID qid) {
+    getQueue(qid, getTimeoutMs);
+  }
+
+  public void getQueue(UniqueID qid, int timeoutMs) {
+    store.getQueue(qid.getBytes(), timeoutMs);
+  }
+
+  public <T> T readQueue(UniqueID qid, long index) throws TaskExecutionException {
+    return readQueue(qid, index, getTimeoutMs);
+  }
+
+  public <T> T readQueue(UniqueID qid, long index, int timeoutMs)
+      throws TaskExecutionException {
+    byte[] obj = store.readQueue(qid.getBytes(), index, timeoutMs);
+
+    if (obj != null) {
+      T t = Serializer.decode(obj, WorkerContext.currentClassLoader());
+      //store.release(qid.getBytes());
+      if (t instanceof TaskExecutionException) {
+        throw (TaskExecutionException) t;
+      }
+      return t;
+    } else {
+      return null;
+    }
   }
 
   public <T> WaitResult<T> wait(RayList<T> waitfor, int numReturns, int timeout) {

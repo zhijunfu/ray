@@ -1,4 +1,4 @@
-# Simple test for plasma queue usage. Actor A produces datas and Actor B 
+# Simple test for plasma queue usage. Actor A produces datas and Actor B
 # consumes them. We also add a normal Ray implementation for comparition.
 
 from __future__ import absolute_import
@@ -30,11 +30,13 @@ import time
 #    def get_sum(self):
 #        return self.sum
 
+
 # Provider A and Receiver B using plasma queue
 @ray.remote
 class A(object):
     def __init__(self):
         print("Actor A start...")
+
     def f(self):
         qid = ray.create_queue()
         print("create_queue success, qid: " + str(qid))
@@ -48,19 +50,23 @@ class A(object):
             print("push_queue, val: " + str(i))
         time.sleep(5)
 
+
 @ray.remote
 class B(object):
     def __init__(self, qid):
         print("Actor B start...")
         self.qid = qid
         self.sum = 0
+
     def f(self):
         for _ in range(10):
             val = ray.read_queue(self.qid)
             self.sum += val
             print("read_queue, val: " + str(val))
+
     def get_sum(self):
         return self.sum
+
 
 if __name__ == "__main__":
     ray.init()

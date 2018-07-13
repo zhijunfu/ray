@@ -36,11 +36,11 @@ Then we setup a ray cluster with containers ray1 and ray2. Say we decide to star
 
 On ray2, we do:
 
-# ray start --head --redis-port=6379 --resources=='{"Resource1": 4}'
+# ray start --head --redis-port=6379 --resources='{"Resource2": 4}'
 
 On ray1:
 
-ray start --redis-address 172.17.0.3:6379 --resources='{"Resource1": 2}'
+# ray start --redis-address 172.17.0.3:6379 --resources='{"Resource1": 2}'
 
 Then resources are used to make sure queue writer and queue reader are scheduled to different nodes.
 
