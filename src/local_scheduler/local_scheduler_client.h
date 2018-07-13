@@ -240,4 +240,8 @@ void local_scheduler_push_profile_events(
     LocalSchedulerConnection *conn,
     const ProfileTableDataT &profile_events);
 
+bool local_scheduler_subscribe_queue(
+    LocalSchedulerConnection *conn,
+    ObjectID object_id);
+
 #endif

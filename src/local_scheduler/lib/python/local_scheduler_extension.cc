@@ -410,6 +410,21 @@ static PyObject *PyLocalSchedulerClient_push_profile_events(PyObject *self,
       profile_info);
 
   Py_RETURN_NONE;
+
+static PyObject *PyLocalSchedulerClient_subscribe_queue(PyObject *self,
+                                                        PyObject *args) {
+  ObjectID object_id;
+  if (!PyArg_ParseTuple(args, "O&", &PyObjectToUniqueID, &object_id)) {
+    return NULL;
+  }
+
+  auto success = local_scheduler_subscribe_queue(
+      ((PyLocalSchedulerClient *) self)->local_scheduler_connection, object_id);
+  if (success) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
 }
 
 static PyMethodDef PyLocalSchedulerClient_methods[] = {
@@ -444,6 +459,8 @@ static PyMethodDef PyLocalSchedulerClient_methods[] = {
     {"push_profile_events",
      (PyCFunction) PyLocalSchedulerClient_push_profile_events, METH_VARARGS,
      "Store some profiling events in the GCS."},
+    {"subscribe_queue", (PyCFunction) PyLocalSchedulerClient_subscribe_queue, METH_VARARGS,
+     "subscribe a remote queue"},
     {NULL} /* Sentinel */
 };
 
