@@ -2574,14 +2574,17 @@ def read_queue(queue_id, worker=global_worker, queue_is_subscribed=False):
         # first time.
         if queue_id not in worker.plasma_queue_reading_index:
             if worker.use_raylet:
+                object_id = ray.ObjectID(queue_id)
+                object_ids = []
+                object_ids.append(object_id)
                 ready_ids, remaining_ids = worker.local_scheduler_client.wait(
-                    ray.ObjectID(queue_id), 1, -1, False)
+                    object_ids, 1, -1, False)
                 if len(ready_ids) != 1 :
                     raise Exception("number of ready object ids must be 1")
                 if len(remaining_ids) != 0 :
                     raise Exception("number of remaining object ids must be 0")
 
-                success = worker.local_scheduler.subscribe_queue(ray.ObjectID(queue_id))
+                success = worker.local_scheduler_client.subscribe_queue(object_id)
                 if not success :
                     raise Exception("Subscribe queue failed")
 
