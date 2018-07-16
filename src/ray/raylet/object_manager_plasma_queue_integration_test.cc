@@ -195,7 +195,7 @@ class TestObjectManagerIntegration : public TestObjectManagerBase {
     std::vector<plasma::ObjectBuffer> object_buffers;
 
     RAY_LOG(INFO) << "Create queue object " << object_id;  
-    int64_t queue_size = 1024 * 1024;
+    int64_t queue_size = 100 * 1024 * 1024;
     std::shared_ptr<Buffer> data;
     ARROW_CHECK_OK(client1.CreateQueue(object_id, queue_size, &data));
 
@@ -213,7 +213,6 @@ class TestObjectManagerIntegration : public TestObjectManagerBase {
       // in the same thread with ObjectManager. Plasma queue test also involves 
       // receiving messages (GetQueueItem) thus cannot run within the same thread
       // as ObjectManager.
-
       RAY_LOG(INFO) << "Wait for object id to appear in GCS";
       auto wait_return = RayletWait(raylet2_conn, {object_id}, 1, -1, false);
       
@@ -238,20 +237,24 @@ class TestObjectManagerIntegration : public TestObjectManagerBase {
       // the item notification would not be pushed to client2 (will fix later).
       //sleep(5);
 
-      RAY_LOG(INFO) << "PushQueueItem started " << object_id;  
-
       std::vector<uint64_t> items;
-      items.resize(10);
+      items.resize(100 * 1000);
       for (uint32_t i = 0; i < items.size(); i++) {
         items[i] = i;
       }
 
+      using namespace std::chrono;
+      auto curr_time = std::chrono::system_clock::now();
+      RAY_LOG(INFO) << "PushQueueItem started " << object_id;
       for (uint32_t i = 0; i < items.size(); i++) {
         uint8_t* data = reinterpret_cast<uint8_t*>(&items[i]);
         uint32_t data_size = static_cast<uint32_t>(sizeof(uint64_t));
         ARROW_CHECK_OK(client1.PushQueueItem(object_id, data, data_size));
       }
+      duration<double> push_time = std::chrono::system_clock::now() - curr_time;
+      RAY_LOG(INFO) << "PushQueueItem takes " << push_time.count()  << " seconds";  
 
+      curr_time = std::chrono::system_clock::now();
       RAY_LOG(INFO) << "GetQueueItem started " << object_id;  
       for (uint32_t i = 0; i < items.size(); i++) {
         uint8_t* buff = nullptr;
@@ -264,6 +267,8 @@ class TestObjectManagerIntegration : public TestObjectManagerBase {
         uint64_t value = *(uint64_t*)(buff);
         RAY_CHECK(value == items[i]);
       }
+      duration<double> get_time = std::chrono::system_clock::now() - curr_time;
+      RAY_LOG(INFO) << "GetQueueItem takes " << get_time.count() << " seconds";  
 
       RAY_LOG(INFO) << "Plasma queue test done " << object_id;  
       TestComplete();
