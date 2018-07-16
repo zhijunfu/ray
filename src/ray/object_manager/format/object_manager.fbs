@@ -2,9 +2,14 @@
 namespace ray.object_manager.protocol;
 
 enum MessageType:int {
-  ConnectClient = 1,
+  // TODO: fix me -- DisconnectClient is 6, we must not overlap with it.
+  ConnectClient = 10,
   PushRequest,
-  PullRequest
+  PullRequest,
+  PullObjectInfo,
+  PushObjectInfo,
+  SubscribeQueue,
+  PushQueueItem
 }
 
 table PushRequestMessage {
@@ -30,4 +35,38 @@ table ConnectClientMessage {
   client_id: string;
   // Whether this is a transfer connection.
   is_transfer: bool;
+}
+
+table PullObjectInfoMessage {
+  // ID of the requesting client.
+  client_id: string;
+  // Requested ObjectID.
+  object_id: string;
+}
+
+table PushObjectInfoMessage {
+  // ID of the requesting client.
+  client_id: string;
+  // The object ID being transferred.
+  object_id: string;
+  // The total size of the object + metadata.
+  data_size: ulong;
+  // The metadata size.
+  metadata_size: ulong;
+}
+
+table SubscribeQueueMessage {
+  // ID of the requesting client.
+  client_id: string;  
+  // The object ID of the subscribed queue.
+  object_id: string;  
+}
+
+table PushQueueItemMessage {
+  // The object ID being transferred.
+  object_id: string;
+  // Sequence ID for the queue item.
+  seq_id: ulong;
+  // Size of queue item.
+  data_size: ulong;
 }

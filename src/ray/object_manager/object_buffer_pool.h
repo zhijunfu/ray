@@ -124,6 +124,16 @@ class ObjectBufferPool {
   /// \param chunk_index The index of the chunk.
   void SealChunk(const ObjectID &object_id, uint64_t chunk_index);
 
+  // Queue related interfaces.
+  ray::Status CreateQueue(
+      const ObjectID &object_id, uint64_t data_size, uint64_t metadata_size);
+
+  ray::Status GetQueue(const ObjectID &object_id, int64_t timeout_ms, plasma::ObjectBuffer* object_buffer);
+
+  ray::Status CreateQueueItem(const ObjectID& object_id, uint32_t data_size, std::shared_ptr<Buffer>* data, uint64_t& seq_id);
+
+  ray::Status SealQueueItem(const ObjectID& object_id, uint64_t seq_id, std::shared_ptr<Buffer> data);  
+
  private:
   /// Abort the create operation associated with an object. This destroys the buffer
   /// state, including create operations in progress for all chunks of the object.

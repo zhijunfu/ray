@@ -306,3 +306,30 @@ std::pair<std::vector<ObjectID>, std::vector<ObjectID>> local_scheduler_wait(
   free(reply);
   return result;
 }
+
+bool local_scheduler_subscribe_queue(
+    LocalSchedulerConnection *conn,
+    ObjectID object_id) {
+  // Write request.
+  flatbuffers::FlatBufferBuilder fbb;
+  auto message = ray::protocol::CreateSubscribeQueueRequest(
+    fbb, to_flatbuf(fbb, object_id));
+  fbb.Finish(message);
+  write_message(conn->conn,
+                static_cast<int64_t>(ray::protocol::MessageType::SubscribeQueueRequest),
+                fbb.GetSize(), fbb.GetBufferPointer());
+  // Read result.
+  int64_t type;
+  int64_t reply_size;
+  uint8_t *reply;
+  read_message(conn->conn, &type, &reply_size, &reply);
+  RAY_CHECK(static_cast<ray::protocol::MessageType>(type) ==
+            ray::protocol::MessageType::SubscribeQueueReply);
+  auto reply_message = flatbuffers::GetRoot<ray::protocol::SubscribeQueueReply>(reply);
+  // Convert result.
+  bool success = reply_message->success();
+  /* Free the original message from the local scheduler. */
+  free(reply);
+  return success;
+}
+

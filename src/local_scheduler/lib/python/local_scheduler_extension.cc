@@ -286,6 +286,22 @@ static PyObject *PyLocalSchedulerClient_wait(PyObject *self, PyObject *args) {
   return Py_BuildValue("(OO)", py_found, py_remaining);
 }
 
+static PyObject *PyLocalSchedulerClient_subscribe_queue(PyObject *self,
+                                                        PyObject *args) {
+  ObjectID object_id;
+  if (!PyArg_ParseTuple(args, "O&", &PyObjectToUniqueID, &object_id)) {
+    return NULL;
+  }
+
+  auto success = local_scheduler_subscribe_queue(
+      ((PyLocalSchedulerClient *) self)->local_scheduler_connection, object_id);
+  if (success) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+}
+
 static PyMethodDef PyLocalSchedulerClient_methods[] = {
     {"disconnect", (PyCFunction) PyLocalSchedulerClient_disconnect, METH_NOARGS,
      "Notify the local scheduler that this client is exiting gracefully."},
@@ -313,6 +329,8 @@ static PyMethodDef PyLocalSchedulerClient_methods[] = {
      (PyCFunction) PyLocalSchedulerClient_set_actor_frontier, METH_VARARGS, ""},
     {"wait", (PyCFunction) PyLocalSchedulerClient_wait, METH_VARARGS,
      "Wait for a list of objects to be created."},
+    {"subscribe_queue", (PyCFunction) PyLocalSchedulerClient_subscribe_queue, METH_VARARGS,
+     "subscribe a remote queue"},
     {NULL} /* Sentinel */
 };
 
