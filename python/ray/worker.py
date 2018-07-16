@@ -2478,11 +2478,11 @@ def create_queue(total_bytes=1024000, worker=global_worker):
         The bytes-like object ID assigned to this value.
     """
     worker.check_connected()
-    with log_span("ray:create_queue", worker=worker):
+    with profiling.profile("create_queue", worker=worker):
         check_main_thread()
 
-        if worker.mode == PYTHON_MODE:
-            # In PYTHON_MODE, ray.create_queue is the identity operation.
+        if worker.mode == LOCAL_MODE:
+            # In LOCAL_MODE, ray.create_queue is the identity operation.
             return None
         if not isinstance(total_bytes, int):
             raise Exception(
@@ -2512,11 +2512,11 @@ def push_queue(queue_id, value, worker=global_worker):
     Returns:
     """
     worker.check_connected()
-    with log_span("ray:push_queue", worker=worker):
+    with profiling.profile("push_queue", worker=worker):
         check_main_thread()
 
-        if worker.mode == PYTHON_MODE:
-            # In PYTHON_MODE, ray.put is the identity operation.
+        if worker.mode == LOCAL_MODE:
+            # In LOCAL_MODE, ray.push_queue is the identity operation.
             return value
         # Make sure that the plasma queue is an bytes-like object ID.
         if not isinstance(ray.ObjectID(queue_id), ray.ObjectID):
@@ -2547,11 +2547,11 @@ def read_queue(queue_id, worker=global_worker, queue_is_subscribed=False):
         A Python object.
     """
     worker.check_connected()
-    with log_span("ray:read_queue", worker=worker):
+    with profiling.profile("read_queue", worker=worker):
         check_main_thread()
 
-        if worker.mode == PYTHON_MODE:
-            # In PYTHON_MODE, ray.read_queue is the identity operation (the
+        if worker.mode == LOCAL_MODE:
+            # In LOCAL_MODE, ray.read_queue is the identity operation (the
             # input will actually be a value not an objectid).
             return queue_id
         """Get the value in the plasma store associated with the IDs. Return

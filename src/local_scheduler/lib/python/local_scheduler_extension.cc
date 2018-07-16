@@ -410,6 +410,7 @@ static PyObject *PyLocalSchedulerClient_push_profile_events(PyObject *self,
       profile_info);
 
   Py_RETURN_NONE;
+}
 
 static PyObject *PyLocalSchedulerClient_subscribe_queue(PyObject *self,
                                                         PyObject *args) {

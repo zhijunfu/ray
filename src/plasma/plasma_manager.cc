@@ -1594,7 +1594,7 @@ void process_new_queue_item(event_loop *loop,
   //printf("process_new_queue_item(): got seq id: %llu\n", seq_id);
   
   PlasmaRequestBuffer *buf = new PlasmaRequestBuffer();
-  buf->type = MessageType_PlasmaQueueItemInfo;
+  buf->type = MessageType::PlasmaQueueItemInfo;
   buf->object_id = object_id;
   buf->seq_id = seq_id;
   /* We treat buf->data as a pointer to the concatenated data and metadata, so
@@ -1731,7 +1731,7 @@ void process_message(event_loop *loop,
     process_remote_queue_item(client_sock, item_info, conn);
     break;
   }
-  case MessageType_PlasmaDataRequest: {
+  case MessageType::PlasmaDataRequest: {
     RAY_LOG(DEBUG) << "Processing data request";
     plasma::ObjectID object_id;
     char *address;
@@ -1761,7 +1761,7 @@ void process_message(event_loop *loop,
                            object_ids_to_fetch.data(), false);
   } break;
   // This is sent from client to local plasma manager.
-  case MessageType_PlasmaFetchQueueInfoRequest: {
+  case MessageType::PlasmaFetchQueueInfoRequest: {
     RAY_LOG(DEBUG) << "Processing fetch remote";
     std::vector<plasma::ObjectID> object_ids_to_fetch;
     object_ids_to_fetch.resize(1);
