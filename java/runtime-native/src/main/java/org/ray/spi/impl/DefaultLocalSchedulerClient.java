@@ -94,6 +94,13 @@ public class DefaultLocalSchedulerClient implements LocalSchedulerLink {
     _notify_unblocked(client);
   }
 
+  @Override
+  public boolean subscribeQueue(UniqueID objectId) {
+    return _subscribe_queue(client, objectId.getBytes());
+  }
+
+  private static native boolean _subscribe_queue(long client, byte[] objectId);
+
   private static native void _notify_unblocked(long client);
 
   private static native void _reconstruct_object(long client, byte[] objectId);

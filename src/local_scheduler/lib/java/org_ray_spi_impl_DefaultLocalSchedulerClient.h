@@ -130,6 +130,18 @@ Java_org_ray_spi_impl_DefaultLocalSchedulerClient__1waitObject(JNIEnv *,
                                                                jint, 
                                                                jboolean);
 
+/*
+ * Class:     org_ray_spi_impl_DefaultLocalSchedulerClient
+ * Method:    _subscribe_queue
+ * Signature: (J[B)V
+ */
+JNIEXPORT jboolean JNICALL
+Java_org_ray_spi_impl_DefaultLocalSchedulerClient__1subscribe_1queue(
+    JNIEnv *env,
+    jclass,
+    jlong c,
+    jbyteArray oid);
+
 #ifdef __cplusplus
 }
 #endif

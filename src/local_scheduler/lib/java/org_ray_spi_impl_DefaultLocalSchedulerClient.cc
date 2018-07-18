@@ -284,6 +284,29 @@ Java_org_ray_spi_impl_DefaultLocalSchedulerClient__1waitObject(JNIEnv *env,
   return resultArray;
 }
 
+
+/*
+ * Class:     org_ray_spi_impl_DefaultLocalSchedulerClient
+ * Method:    _subscribe_queue
+ * Signature: (J[B)V
+ */
+JNIEXPORT jboolean JNICALL
+Java_org_ray_spi_impl_DefaultLocalSchedulerClient__1subscribe_1queue(
+    JNIEnv *env,
+    jclass,
+    jlong c,
+    jbyteArray oid) {
+  // native private static void _subscribe_queue(long client, byte[]
+  // objectId);
+  UniqueIdFromJByteArray o(env, oid);
+  auto client = reinterpret_cast<LocalSchedulerConnection *>(c);
+  if (local_scheduler_subscribe_queue(client, *o.PID)) {
+    return JNI_TRUE;
+  } else {
+    return JNI_FALSE;
+  }
+}
+
 #ifdef __cplusplus
 }
 #endif

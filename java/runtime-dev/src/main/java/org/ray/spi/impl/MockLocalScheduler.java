@@ -88,4 +88,9 @@ public class MockLocalScheduler implements LocalSchedulerLink {
   public List<byte[]> wait(byte[][] objectIds, int timeoutMs, int numReturns) {
     return null;
   }
+
+  @Override
+  public boolean subscribeQueue(UniqueID objectId) {
+    return true;
+  }
 }

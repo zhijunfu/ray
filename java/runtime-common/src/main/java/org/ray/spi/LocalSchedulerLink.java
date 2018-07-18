@@ -22,6 +22,8 @@ public interface LocalSchedulerLink {
 
   List<byte[]> wait(byte[][] objectIds, int timeoutMs, int numReturns);
 
+  boolean subscribeQueue(UniqueID objectId);
+
   default void fetch(UniqueID objectId) {
     reconstructObject(objectId);
   }

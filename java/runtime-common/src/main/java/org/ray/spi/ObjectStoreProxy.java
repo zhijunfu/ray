@@ -110,6 +110,22 @@ public class ObjectStoreProxy {
   }
 
   public void getQueue(UniqueID qid, int timeoutMs) {
+    if (localSchedulerLink != null) {
+      // raylet case.
+      RayObject obj = new RayObject(qid);
+      RayList<RayObject> waitObjs = new RayList<>();
+      waitObjs.add(obj);
+      
+      WaitResult<RayObject> result = wait(waitObjs, 1, timeoutMs);
+      if (result.getReadyOnes().size() != 1 || result.getRemainOnes().size() != 0) {
+        throw new RuntimeException("wait(0 should return only one object");
+      }
+
+      if (!localSchedulerLink.subscribeQueue(qid)) {
+        throw new RuntimeException("subscribeQueue failed");
+      }
+    }
+
     store.getQueue(qid.getBytes(), timeoutMs);
   }
 

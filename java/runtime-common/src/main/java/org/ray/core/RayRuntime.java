@@ -265,7 +265,9 @@ public abstract class RayRuntime implements RayApi {
     UniqueID objectId = getCurrentTaskNextPutId();
 
     RayLog.core.info("Task " + taskId.toString() + " Object " + objectId.toString() + " createQueue");
-    localSchedulerProxy.markTaskPutDependency(taskId, objectId);
+    if (!params.use_raylet) {
+      localSchedulerProxy.markTaskPutDependency(taskId, objectId);
+    }
     objectStoreProxy.createQueue(objectId, totalBytes);
     return objectId;
   }
