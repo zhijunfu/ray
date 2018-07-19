@@ -116,21 +116,35 @@ class SchedulingQueue {
   void MoveTasks(std::unordered_set<TaskID> tasks, TaskState src_state,
                  TaskState dst_state);
 
+  class TaskQueue {
+  public:
+    TaskQueue() {}
+    bool Append(const TaskID &task_id, const Task &task);
+    bool Remove(const TaskID &task_id);
+    bool Remove(const TaskID &task_id, std::vector<Task> &removed_tasks);
+
+    const std::list<Task> &GetTasks() const;
+  private:
+    std::list<Task> list_;
+    std::unordered_map<TaskID, std::list<Task>::iterator> map_;
+  };
+
  private:
+ 
   /// Tasks that are destined for actors that have not yet been created.
-  std::list<Task> uncreated_actor_methods_;
+  TaskQueue uncreated_actor_methods_;
   /// Tasks that are waiting for an object dependency to appear locally.
-  std::list<Task> waiting_tasks_;
+  TaskQueue waiting_tasks_;
   /// Tasks whose object dependencies are locally available, but that are
   /// waiting to be scheduled.
-  std::list<Task> placeable_tasks_;
+  TaskQueue placeable_tasks_;
   /// Tasks ready for dispatch, but that are waiting for a worker.
-  std::list<Task> ready_tasks_;
+  TaskQueue ready_tasks_;
   /// Tasks that are running on a worker.
-  std::list<Task> running_tasks_;
+  TaskQueue running_tasks_;
   /// Tasks that were dispatched to a worker but are blocked on a data
   /// dependency that was missing at runtime.
-  std::list<Task> blocked_tasks_;
+  TaskQueue blocked_tasks_;
 };
 
 }  // namespace raylet

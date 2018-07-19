@@ -6,40 +6,79 @@ namespace ray {
 
 namespace raylet {
 
+bool SchedulingQueue::TaskQueue::Append(const TaskID &task_id, const Task &task) {
+  if (map_.find(task_id) != map_.end()) {
+    // This shouldn't happen.
+    return false;
+  }
+
+  auto list_iter = list_.insert(list_.end(), task);
+  map_[task_id] = list_iter;
+  return true;
+}
+
+bool SchedulingQueue::TaskQueue::Remove(const TaskID &task_id) {
+  auto iter = map_.find(task_id);
+  if (iter == map_.end()) {
+    // not exist.
+    return false;
+  }
+
+  auto list_iter = iter->second;
+  map_.erase(iter);
+  list_.erase(list_iter);
+  return true;
+}
+
+bool SchedulingQueue::TaskQueue::Remove(const TaskID &task_id, std::vector<Task> &removed_tasks) {
+  auto iter = map_.find(task_id);
+  if (iter == map_.end()) {
+    // not exist.
+    return false;
+  }
+
+  auto list_iter = iter->second;
+  removed_tasks.push_back(std::move(*list_iter));
+  map_.erase(iter);
+  list_.erase(list_iter);
+  return true;
+}
+
+const std::list<Task> &SchedulingQueue::TaskQueue::GetTasks() const {
+  return list_;
+}
+
 const std::list<Task> &SchedulingQueue::GetUncreatedActorMethods() const {
-  return this->uncreated_actor_methods_;
+  return this->uncreated_actor_methods_.GetTasks();
 }
 
 const std::list<Task> &SchedulingQueue::GetWaitingTasks() const {
-  return this->waiting_tasks_;
+  return this->waiting_tasks_.GetTasks();
 }
 
 const std::list<Task> &SchedulingQueue::GetPlaceableTasks() const {
-  return this->placeable_tasks_;
+  return this->placeable_tasks_.GetTasks();
 }
 
 const std::list<Task> &SchedulingQueue::GetReadyTasks() const {
-  return this->ready_tasks_;
+  return this->ready_tasks_.GetTasks();
 }
 
 const std::list<Task> &SchedulingQueue::GetRunningTasks() const {
-  return this->running_tasks_;
+  return this->running_tasks_.GetTasks();
 }
 
 const std::list<Task> &SchedulingQueue::GetBlockedTasks() const {
-  return this->blocked_tasks_;
+  return this->blocked_tasks_.GetTasks();
 }
 
 // Helper function to remove tasks in the given set of task_ids from a
 // queue, and append them to the given vector removed_tasks.
-void removeTasksFromQueue(std::list<Task> &queue, std::unordered_set<TaskID> &task_ids,
+void removeTasksFromQueue(SchedulingQueue::TaskQueue &queue, std::unordered_set<TaskID> &task_ids,
                           std::vector<Task> &removed_tasks) {
-  for (auto it = queue.begin(); it != queue.end();) {
-    auto task_id = task_ids.find(it->GetTaskSpecification().TaskId());
-    if (task_id != task_ids.end()) {
-      task_ids.erase(task_id);
-      removed_tasks.push_back(std::move(*it));
-      it = queue.erase(it);
+  for (auto it = task_ids.begin(); it != task_ids.end();) {
+    if (queue.Remove(*it, removed_tasks)) {
+      it = task_ids.erase(it);
     } else {
       it++;
     }
@@ -47,8 +86,10 @@ void removeTasksFromQueue(std::list<Task> &queue, std::unordered_set<TaskID> &ta
 }
 
 // Helper function to queue the given tasks to the given queue.
-inline void queueTasks(std::list<Task> &queue, const std::vector<Task> &tasks) {
-  queue.insert(queue.end(), tasks.begin(), tasks.end());
+inline void queueTasks(SchedulingQueue::TaskQueue &queue, const std::vector<Task> &tasks) {
+  for (auto &task : tasks) {
+    queue.Append(task.GetTaskSpecification().TaskId(), task);
+  }
 }
 
 std::vector<Task> SchedulingQueue::RemoveTasks(std::unordered_set<TaskID> task_ids) {
