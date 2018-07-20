@@ -76,6 +76,6 @@ class B(object):
 
 
 if __name__ == "__main__":
-    ray.init()
+    ray.init(use_raylet=True)
     A.remote().f.remote()
-    time.sleep(2000)
+    time.sleep(600)
