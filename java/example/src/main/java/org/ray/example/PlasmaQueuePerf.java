@@ -32,11 +32,10 @@ public class PlasmaQueuePerf {
           Ray.call(A::f, a, numOfItems, queueSize);
           Thread.sleep(30 * 1000);
 /*
-
           RayLog.rapp.warn("plasma object test started......");   
           RayActor<AA> aa = Ray.create(PlasmaQueuePerf.AA.class);
           Ray.call(AA::f, aa, numOfItems);
-          Thread.sleep(100 * 1000);
+          Thread.sleep(1000 * 1000);
 */
         } catch (Throwable t) {
           t.printStackTrace();
@@ -99,9 +98,9 @@ public class PlasmaQueuePerf {
 
     public Integer f() {
       RayLog.rapp.warn("B::f started...");
-      String timeStamp = new SimpleDateFormat("yyyy.MM.dd.HH.mm.ss.SSS").format(new Date());
       
       Object obj = Ray.readQueue(this.qid);
+      String timeStamp = new SimpleDateFormat("yyyy.MM.dd.HH.mm.ss.SSS").format(new Date());
       RayLog.rapp.warn("get_queue start......" + timeStamp);
       for (int i = 0; i < this.numOfItems - 1; i = i + 1) {
         // Get object from a plasma queue
