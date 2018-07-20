@@ -106,6 +106,7 @@ class TestObjectManagerBase : public ::testing::Test {
     //ASSERT_TRUE(!s);
     s = system("rm /tmp/raylet_2");
     //ASSERT_TRUE(!s);
+    RAY_LOG(DEBUG) << s;
   }
 
    void StartTestService() { test_service.run(); }

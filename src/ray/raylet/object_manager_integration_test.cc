@@ -101,6 +101,7 @@ class TestObjectManagerBase : public ::testing::Test {
     //ASSERT_TRUE(!s);
     s = system("rm /tmp/raylet_2");
     //ASSERT_TRUE(!s);
+    RAY_LOG(DEBUG) << s;
   }
 
   ObjectID WriteDataToClient(plasma::PlasmaClient &client, int64_t data_size) {
