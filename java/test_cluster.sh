@@ -26,6 +26,7 @@ popd
 # run with cluster mode
 pushd local_deploy
 export RAY_CONFIG=ray/ray.config.ini
-ARGS=" --package ../example/app1.zip --class org.ray.example.HelloWorld --args=test1,test2  --redis-address=$local_ip:34222"
+#ARGS=" --package ../example/app1.zip --class org.ray.example.HelloWorld --args=test1,test2  --redis-address=$local_ip:34222"
+ARGS=" --package ../example/app1.zip --class org.ray.example.PlasmaQueuePerf  --redis-address=$local_ip:34222"
 ../local_deploy/run.sh submit $ARGS
 popd
