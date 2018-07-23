@@ -124,6 +124,8 @@ class Lineage {
   /// greater than the current entry.
   /// \return Whether the entry was set.
   bool SetEntry(LineageEntry &&entry);
+  bool SetEntry(const LineageEntry &entry);
+  bool SetEntry(const Task &task, GcsStatus status);
 
   /// Delete and return an entry from the lineage.
   ///
