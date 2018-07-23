@@ -41,10 +41,9 @@ const Task &LineageEntry::TaskData() const { return task_; }
 
 Task &LineageEntry::TaskDataMutable() { return task_; }
 
-Lineage::Lineage() : entries_(allocator_) {}
+Lineage::Lineage() {}
 
-Lineage::Lineage(const protocol::ForwardTaskRequest &task_request) 
-  : entries_(allocator_) {
+Lineage::Lineage(const protocol::ForwardTaskRequest &task_request) {
   // Deserialize and set entries for the uncommitted tasks.
   auto tasks = task_request.uncommitted_tasks();
   for (auto it = tasks->begin(); it != tasks->end(); it++) {
@@ -52,13 +51,6 @@ Lineage::Lineage(const protocol::ForwardTaskRequest &task_request)
     LineageEntry entry(task, GcsStatus::UNCOMMITTED_REMOTE);
     RAY_CHECK(SetEntry(std::move(entry)));
   }
-}
-
-Lineage::~Lineage() {
-  entries_.clear();
-  boost::singleton_pool<boost::fast_pool_allocator_tag, 
-    sizeof(std::pair<const TaskID, LineageEntry>)>::
-    release_memory();
 }
 
 boost::optional<const LineageEntry &> Lineage::GetEntry(const UniqueID &task_id) const {
@@ -111,7 +103,7 @@ boost::optional<LineageEntry> Lineage::PopEntry(const UniqueID &task_id) {
   }
 }
 
-const Lineage::LineageMap &Lineage::GetEntries() const {
+const std::unordered_map<const UniqueID, LineageEntry> &Lineage::GetEntries() const {
   return entries_;
 }
 

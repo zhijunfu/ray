@@ -2,8 +2,6 @@
 #define RAY_RAYLET_LINEAGE_CACHE_H
 
 #include <boost/optional.hpp>
-#include <boost/unordered_map.hpp>
-#include <boost/pool/pool_alloc.hpp> 
 
 // clang-format off
 #include "common_protocol.h"
@@ -109,8 +107,6 @@ class Lineage {
   /// uncommitted tasks in the request will be added to the lineage.
   Lineage(const protocol::ForwardTaskRequest &task_request);
 
-  ~Lineage();
-
   /// Get an entry from the lineage.
   ///
   /// \param entry_id The ID of the entry to get.
@@ -136,21 +132,10 @@ class Lineage {
   /// the entry ID is not in the lineage.
   boost::optional<LineageEntry> PopEntry(const TaskID &entry_id);
 
-  typedef boost::fast_pool_allocator<
-    std::pair<TaskID, LineageEntry>,
-    boost::default_user_allocator_new_delete,
-    boost::details::pool::default_mutex,
-    64, 128> PoolAllocator;
-
-  typedef boost::unordered_map<TaskID, LineageEntry, 
-    std::hash<TaskID>, 
-    std::equal_to<TaskID>,
-    PoolAllocator> LineageMap;
-
   /// Get all entries in the lineage.
   ///
   /// \return A const reference to the lineage entries.
-  const LineageMap &GetEntries() const;
+  const std::unordered_map<const TaskID, LineageEntry> &GetEntries() const;
 
   /// Serialize this lineage to a ForwardTaskRequest flatbuffer.
   ///
@@ -162,11 +147,8 @@ class Lineage {
       flatbuffers::FlatBufferBuilder &fbb, const TaskID &entry_id) const;
 
  private:
-
-  PoolAllocator allocator_;
-  
   /// The lineage entries.
-  LineageMap entries_;
+  std::unordered_map<const TaskID, LineageEntry> entries_;
 };
 
 /// \class LineageCache
