@@ -2501,7 +2501,6 @@ def create_queue(total_bytes=1024000, worker=global_worker):
         worker.put_index += 1
         return queue_id
 
-
 def push_queue(queue_id, value, worker=global_worker):
     """Push an object to the corresponding plasma queue.
 
@@ -2532,6 +2531,61 @@ def push_queue(queue_id, value, worker=global_worker):
 
         # Serialize and put the object in the plasma queue.
         worker.store_and_register(queue_id, value)
+
+
+def subscribe_queue(queue_id, worker=global_worker):
+    """Get an queue object from plasma store.
+
+    This method blocks until the object is available in the plasma queue.
+
+    Args:
+        queue_id: bytes-like Object ID of the corresponding plasma queue to get
+        object.
+
+    Returns:
+        A Python object.
+    """
+    worker.check_connected()
+    with profiling.profile("get_queue", worker=worker):
+        check_main_thread()
+
+        if worker.mode == LOCAL_MODE:
+            # In LOCAL_MODE, ray.read_queue is the identity operation (the
+            # input will actually be a value not an objectid).
+            return
+        """Get the value in the plasma store associated with the IDs. Return
+        the value from the plasma store. This will block until the value has
+        been written to the plasma store.
+        """
+        # Make sure that the value is not an object ID.
+        if isinstance(queue_id, ray.ObjectID):
+            raise Exception(
+                "Calling 'read_queue' on an ObjectID is not allowed"
+                "(similarly, returning an ObjectID from a remote "
+                "function is not allowed).")
+        # Make sure that the plasma queue is an bytes-like object ID.
+        if not isinstance(ray.ObjectID(queue_id), ray.ObjectID):
+            raise Exception(
+                "Attempting to call `read_queue` on the value {}, "
+                "which is not an bytes-like ObjectID.".format(queue_id))
+
+        if worker.use_raylet:
+            object_id = ray.ObjectID(queue_id)
+            object_ids = []
+            object_ids.append(object_id)
+            ready_ids, remaining_ids = worker.local_scheduler_client.wait(
+                object_ids, 1, -1, False)
+            if len(ready_ids) != 1 :
+                raise Exception("number of ready object ids must be 1")
+            if len(remaining_ids) != 0 :
+                raise Exception("number of remaining object ids must be 0")
+
+            success = worker.local_scheduler_client.subscribe_queue(object_id)
+            if not success :
+                raise Exception("Subscribe queue failed")
+
+        worker.plasma_client.get_queue(
+            queue_id=pyarrow.plasma.ObjectID(queue_id), timeout_ms=-1)
 
 
 def read_queue(queue_id, worker=global_worker, queue_is_subscribed=False):
@@ -2573,23 +2627,8 @@ def read_queue(queue_id, worker=global_worker, queue_is_subscribed=False):
         # We should subscribe the plasma queue when calling read_queue() the
         # first time.
         if queue_id not in worker.plasma_queue_reading_index:
-            if worker.use_raylet:
-                object_id = ray.ObjectID(queue_id)
-                object_ids = []
-                object_ids.append(object_id)
-                ready_ids, remaining_ids = worker.local_scheduler_client.wait(
-                    object_ids, 1, -1, False)
-                if len(ready_ids) != 1 :
-                    raise Exception("number of ready object ids must be 1")
-                if len(remaining_ids) != 0 :
-                    raise Exception("number of remaining object ids must be 0")
-
-                success = worker.local_scheduler_client.subscribe_queue(object_id)
-                if not success :
-                    raise Exception("Subscribe queue failed")
-
-            worker.plasma_client.get_queue(
-                queue_id=pyarrow.plasma.ObjectID(queue_id), timeout_ms=-1)
+            # Subscribe to queue.
+            subscribe_queue(queue_id, worker)
             worker.plasma_queue_reading_index[queue_id] = 0
 
         # Get the plasma queue. We initially try to get the queue immediately.
