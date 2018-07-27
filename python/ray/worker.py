@@ -2532,8 +2532,28 @@ def push_queue(queue_id, value, worker=global_worker):
         # Serialize and put the object in the plasma queue.
         worker.store_and_register(queue_id, value)
 
+def get_queue_impl(queue_id, worker=global_worker):
+    if queue_id not in worker.plasma_queue_reading_index: 
+        if worker.use_raylet:
+            object_id = ray.ObjectID(queue_id)
+            object_ids = []
+            object_ids.append(object_id)
+            ready_ids, remaining_ids = worker.local_scheduler_client.wait(
+                object_ids, 1, -1, False)
+            if len(ready_ids) != 1 :
+                raise Exception("number of ready object ids must be 1")
+            if len(remaining_ids) != 0 :
+                raise Exception("number of remaining object ids must be 0")
 
-def subscribe_queue(queue_id, worker=global_worker):
+            success = worker.local_scheduler_client.subscribe_queue(object_id)
+            if not success :
+                raise Exception("Subscribe queue failed")
+
+        worker.plasma_client.get_queue(
+            queue_id=pyarrow.plasma.ObjectID(queue_id), timeout_ms=-1)
+        worker.plasma_queue_reading_index[queue_id] = 0
+
+def get_queue(queue_id, worker=global_worker):
     """Get an queue object from plasma store.
 
     This method blocks until the object is available in the plasma queue.
@@ -2568,25 +2588,7 @@ def subscribe_queue(queue_id, worker=global_worker):
             raise Exception(
                 "Attempting to call `read_queue` on the value {}, "
                 "which is not an bytes-like ObjectID.".format(queue_id))
-
-        if worker.use_raylet:
-            object_id = ray.ObjectID(queue_id)
-            object_ids = []
-            object_ids.append(object_id)
-            ready_ids, remaining_ids = worker.local_scheduler_client.wait(
-                object_ids, 1, -1, False)
-            if len(ready_ids) != 1 :
-                raise Exception("number of ready object ids must be 1")
-            if len(remaining_ids) != 0 :
-                raise Exception("number of remaining object ids must be 0")
-
-            success = worker.local_scheduler_client.subscribe_queue(object_id)
-            if not success :
-                raise Exception("Subscribe queue failed")
-
-        worker.plasma_client.get_queue(
-            queue_id=pyarrow.plasma.ObjectID(queue_id), timeout_ms=-1)
-
+        get_queue_impl(queue_id, worker)
 
 def read_queue(queue_id, worker=global_worker, queue_is_subscribed=False):
     """Get an object from the correspongding plasma queue.
@@ -2626,10 +2628,7 @@ def read_queue(queue_id, worker=global_worker, queue_is_subscribed=False):
 
         # We should subscribe the plasma queue when calling read_queue() the
         # first time.
-        if queue_id not in worker.plasma_queue_reading_index:
-            # Subscribe to queue.
-            subscribe_queue(queue_id, worker)
-            worker.plasma_queue_reading_index[queue_id] = 0
+        get_queue_impl(queue_id, worker)
 
         # Get the plasma queue. We initially try to get the queue immediately.
         value = worker.retrieve_and_deserialize(

@@ -73,6 +73,13 @@ public final class Ray extends Rpc {
   }
 
   /**
+   * Get a obj from the plasma queue.
+   */
+  public static <T> void getQueue(UniqueID qid) {
+    return impl.getQueue(qid);
+  }
+
+  /**
    * wait until timeout or enough RayObject are ready.
    *
    * @param waitfor             wait for who

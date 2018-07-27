@@ -60,6 +60,14 @@ public interface RayApi {
    */
   <T> T readQueue(UniqueID qid);
 
+    /**
+   * Get a obj from the plasma queue.
+   *
+   * @param qid the objectID of the plasma queue.
+   * @return Object
+   */
+  <T> void getQueue(UniqueID qid);
+
   /**
    * wait until timeout or enough RayObjects are ready.
    *
