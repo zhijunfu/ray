@@ -76,7 +76,7 @@ public final class Ray extends Rpc {
    * Get a obj from the plasma queue.
    */
   public static <T> void getQueue(UniqueID qid) {
-    return impl.getQueue(qid);
+    impl.getQueue(qid);
   }
 
   /**
