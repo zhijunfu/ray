@@ -298,8 +298,6 @@ Java_org_ray_spi_impl_DefaultLocalSchedulerClient__1waitObject(
   return resultArray;
 }
 
-<<<<<<< HEAD
-
 /*
  * Class:     org_ray_spi_impl_DefaultLocalSchedulerSubscribeQueue
  * Method:    _subscribe_queue

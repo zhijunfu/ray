@@ -29,6 +29,7 @@
 #include "common.h"
 #include "common_protocol.h"
 #include "event_loop.h"
+#include "format/common_generated.h"
 #include "format/plasma_generated.h"
 #include "io.h"
 #include "net.h"
@@ -1679,7 +1680,7 @@ plasma::Status ReadBytes(int fd, uint8_t* cursor, size_t length) {
   return plasma::Status::OK();
 }
 
-void process_remote_queue_item(int client_sock, PlasmaQueueItemInfoT& queue_item, ClientConnection *conn) {
+void process_remote_queue_item(int client_sock, plasma::flatbuf::PlasmaQueueItemInfoT& queue_item, ClientConnection *conn) {
   uint64_t seq_id;
   std::shared_ptr<Buffer> buffer;
 
@@ -1711,7 +1712,7 @@ void process_message(event_loop *loop,
   uint8_t *data;
   read_message(client_sock, &type, &length, &data);
   
-  PlasmaQueueItemInfoT item_info; 
+  plasma::flatbuf::PlasmaQueueItemInfoT item_info; 
 
   switch (static_cast<MessageType>(type)) {
   // Sent from local plasma manager to remote plasma manager.

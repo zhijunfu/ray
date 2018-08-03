@@ -72,6 +72,22 @@ Status ReadStatusRequest(uint8_t *data,
 std::unique_ptr<uint8_t[]> CreateObjectInfoBuffer(
     flatbuf::ObjectInfoT *object_info);
 
+           
+// Subscribe one queue.
+Status SendQueueRemoteSubscribeRequest(int sock, ObjectID object_id, const char* address, int port);
+
+Status ReadQueueRemoteSubscribeRequest(uint8_t* data, size_t size, ObjectID* object_id, char** address,
+                       int* port);
+
+Status SendQueueItemInfo(int sock, ObjectID object_id, uint64_t seq_id, uint64_t offset, uint32_t data_size);
+
+Status ReadQueueItemInfo(uint8_t* data, size_t size, flatbuf::PlasmaQueueItemInfoT* item_info);
+
+
+Status SendFetchQueueInfoRequest(int sock, const ObjectID& object_id);
+
+Status ReadFetchQueueInfoRequest(uint8_t* data, size_t size, ObjectID* object_id);
+
 }  // namespace plasma
 
 #endif
