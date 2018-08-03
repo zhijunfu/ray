@@ -268,7 +268,6 @@ class Worker(object):
         if driver_id not in self.serialization_context_map:
             _initialize_serialization(driver_id)
         return self.serialization_context_map[driver_id]
->>>>>>> upstream/master
 
     def check_connected(self):
         """Check if the worker is connected.
@@ -438,7 +437,7 @@ class Worker(object):
                         queue_id=pyarrow.plasma.ObjectID(object_ids),
                         index=index,
                         timeout_ms=timeout,
-                        self.get_serialization_context(self.task_driver_id))
+                        serialization_context=self.get_serialization_context(self.task_driver_id))
                     return value
                 else:
                     # We divide very large get requests into smaller get
@@ -2558,7 +2557,6 @@ def create_queue(total_bytes=1024000, worker=global_worker):
     """
     worker.check_connected()
     with profiling.profile("create_queue", worker=worker):
-        check_main_thread()
 
         if worker.mode == LOCAL_MODE:
             # In LOCAL_MODE, ray.create_queue is the identity operation.
@@ -2591,7 +2589,6 @@ def push_queue(queue_id, value, worker=global_worker):
     """
     worker.check_connected()
     with profiling.profile("push_queue", worker=worker):
-        check_main_thread()
 
         if worker.mode == LOCAL_MODE:
             # In LOCAL_MODE, ray.push_queue is the identity operation.
@@ -2646,7 +2643,6 @@ def get_queue(queue_id, worker=global_worker):
     """
     worker.check_connected()
     with profiling.profile("get_queue", worker=worker):
-        check_main_thread()
 
         if worker.mode == LOCAL_MODE:
             # In LOCAL_MODE, ray.read_queue is the identity operation (the
@@ -2683,7 +2679,6 @@ def read_queue(queue_id, worker=global_worker, queue_is_subscribed=False):
     """
     worker.check_connected()
     with profiling.profile("read_queue", worker=worker):
-        check_main_thread()
 
         if worker.mode == LOCAL_MODE:
             # In LOCAL_MODE, ray.read_queue is the identity operation (the
