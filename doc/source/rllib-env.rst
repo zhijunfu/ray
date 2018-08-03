@@ -26,6 +26,26 @@ In the high-level agent APIs, environments are identified with string names. By 
     while True:
         print(trainer.train())
 
+Configuring Environments
+------------------------
+
+In the above example, note that the ``env_creator`` function takes in an ``env_config`` object. This is a dict containing options passed in through your agent. You can also access ``env_config.worker_index`` and ``env_config.vector_index`` to get the worker id and env id within the worker (if ``num_envs_per_worker > 0``). This can be useful if you want to train over an ensemble of different environments, for example:
+
+.. code-block:: python
+
+    class MultiEnv(gym.Env):
+        def __init__(self, env_config):
+            # pick actual env based on worker and env indexes
+            self.env = gym.make(
+                choose_env_for(env_config.worker_index, env_config.vector_index))
+            self.action_space = self.env.action_space
+            self.observation_space = self.env.observation_space
+        def reset(self):
+            return self.env.reset()
+        def step(self, action):
+            return self.env.step(action)
+
+    register_env("multienv", lambda config: MultiEnv(config))
 
 OpenAI Gym
 ----------
@@ -112,7 +132,7 @@ If all the agents will be using the same algorithm class to train, then you can 
 
 RLlib will create three distinct policies and route agent decisions to its bound policy. When an agent first appears in the env, ``policy_mapping_fn`` will be called to determine which policy it is bound to. RLlib reports separate training statistics for each policy in the return from ``train()``, along with the combined reward.
 
-Here is a simple `example training script <https://github.com/ray-project/ray/blob/master/python/ray/rllib/examples/multiagent_cartpole.py>`__ in which you can vary the number of agents and policies in the environment. For more advanced usage, e.g., different classes of policies per agent, or more control over the training process, you can use the lower-level RLlib APIs directly to define custom policy graphs or algorithms.
+Here is a simple `example training script <https://github.com/ray-project/ray/blob/master/python/ray/rllib/examples/multiagent_cartpole.py>`__ in which you can vary the number of agents and policies in the environment. For how to use multiple training methods at once (here DQN and PPO), see the `two-trainer example <https://github.com/ray-project/ray/blob/master/python/ray/rllib/examples/multiagent_two_trainers.py>`__.
 
 To scale to hundreds of agents, MultiAgentEnv batches policy evaluations across multiple agents internally. It can also be auto-vectorized by setting ``num_envs_per_worker > 1``.
 

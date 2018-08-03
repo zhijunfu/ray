@@ -30,7 +30,14 @@ docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
     --env CartPole-v1 \
     --run PPO \
     --stop '{"training_iteration": 2}' \
-    --config '{"simple_optimizer": true, "model": {"use_lstm": true}}'
+    --config '{"simple_optimizer": false, "num_sgd_iter": 2, "model": {"use_lstm": true}}'
+
+docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
+    python /ray/python/ray/rllib/train.py \
+    --env CartPole-v1 \
+    --run PPO \
+    --stop '{"training_iteration": 2}' \
+    --config '{"simple_optimizer": true, "num_sgd_iter": 2, "model": {"use_lstm": true}}'
 
 docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
     python /ray/python/ray/rllib/train.py \
@@ -78,7 +85,7 @@ docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
     --env CartPole-v0 \
     --run APEX \
     --stop '{"training_iteration": 2}' \
-    --config '{"num_workers": 2, "timesteps_per_iteration": 1000, "gpu": false}'
+    --config '{"num_workers": 2, "timesteps_per_iteration": 1000, "gpu": false, "min_iter_time_s": 1}'
 
 docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
     python /ray/python/ray/rllib/train.py \
@@ -120,6 +127,13 @@ docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
     --run A3C \
     --stop '{"training_iteration": 2}' \
     --config '{"num_workers": 2, "use_pytorch": true}'
+
+docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
+    python /ray/python/ray/rllib/train.py \
+    --env CartPole-v1 \
+    --run A3C \
+    --stop '{"training_iteration": 2}' \
+    --config '{"num_workers": 2, "model": {"use_lstm": true}}'
 
 docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
     python /ray/python/ray/rllib/train.py \
@@ -172,6 +186,20 @@ docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
 
 docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
     python /ray/python/ray/rllib/train.py \
+    --env CartPole-v0 \
+    --run IMPALA \
+    --stop '{"training_iteration": 2}' \
+    --config '{"gpu": false, "num_workers": 2, "min_iter_time_s": 1}'
+
+docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
+    python /ray/python/ray/rllib/train.py \
+    --env CartPole-v0 \
+    --run IMPALA \
+    --stop '{"training_iteration": 2}' \
+    --config '{"gpu": false, "num_workers": 2, "min_iter_time_s": 1, "model": {"use_lstm": true}}'
+
+docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
+    python /ray/python/ray/rllib/train.py \
     --env MountainCarContinuous-v0 \
     --run DDPG \
     --stop '{"training_iteration": 2}' \
@@ -183,6 +211,14 @@ docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
     --run DDPG \
     --stop '{"training_iteration": 2}' \
     --config '{"num_workers": 1}'
+
+docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
+    python /ray/python/ray/rllib/train.py \
+    --env Pendulum-v0 \
+    --run APEX_DDPG \
+    --ray-num-cpus 8 \
+    --stop '{"training_iteration": 2}' \
+    --config '{"num_workers": 2, "optimizer": {"num_replay_buffer_shards": 1}, "learning_starts": 100, "min_iter_time_s": 1}'
 
 docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
     sh /ray/test/jenkins_tests/multi_node_tests/test_rllib_eval.sh
@@ -234,6 +270,10 @@ docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
     --smoke-test
 
 docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
+    python /ray/python/ray/tune/examples/tune_mnist_keras.py \
+    --smoke-test
+
+docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
     python /ray/python/ray/rllib/examples/legacy_multiagent/multiagent_mountaincar.py
 
 docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
@@ -242,13 +282,17 @@ docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
 docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
     python /ray/python/ray/rllib/examples/multiagent_cartpole.py --num-iters=2
 
-python $ROOT_DIR/multi_node_docker_test.py \
+docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
+    python /ray/python/ray/rllib/examples/multiagent_two_trainers.py --num-iters=2
+
+python3 $ROOT_DIR/multi_node_docker_test.py \
     --docker-image=$DOCKER_SHA \
     --num-nodes=5 \
     --num-redis-shards=10 \
+    --use-raylet \
     --test-script=/ray/test/jenkins_tests/multi_node_tests/test_0.py
 
-python $ROOT_DIR/multi_node_docker_test.py \
+python3 $ROOT_DIR/multi_node_docker_test.py \
     --docker-image=$DOCKER_SHA \
     --num-nodes=5 \
     --num-redis-shards=5 \
@@ -257,17 +301,19 @@ python $ROOT_DIR/multi_node_docker_test.py \
     --driver-locations=0,1,0,1,2,3,4 \
     --test-script=/ray/test/jenkins_tests/multi_node_tests/remove_driver_test.py
 
-python $ROOT_DIR/multi_node_docker_test.py \
+python3 $ROOT_DIR/multi_node_docker_test.py \
     --docker-image=$DOCKER_SHA \
     --num-nodes=5 \
     --num-redis-shards=2 \
     --num-gpus=0,0,5,6,50 \
     --num-drivers=100 \
+    --use-raylet \
     --test-script=/ray/test/jenkins_tests/multi_node_tests/many_drivers_test.py
 
-python $ROOT_DIR/multi_node_docker_test.py \
+python3 $ROOT_DIR/multi_node_docker_test.py \
     --docker-image=$DOCKER_SHA \
     --num-nodes=1 \
     --mem-size=60G \
     --shm-size=60G \
+    --use-raylet \
     --test-script=/ray/test/jenkins_tests/multi_node_tests/large_memory_test.py

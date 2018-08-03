@@ -1,5 +1,6 @@
 package org.ray.spi;
 
+import java.util.List;
 import org.ray.api.UniqueID;
 import org.ray.spi.model.TaskSpec;
 
@@ -14,21 +15,13 @@ public interface LocalSchedulerLink {
 
   void markTaskPutDependency(UniqueID taskId, UniqueID objectId);
 
-  void reconstructObject(UniqueID objectId);
+  void reconstructObject(UniqueID objectId, boolean fetchOnly);
+
+  void reconstructObjects(List<UniqueID> objectIds, boolean fetchOnly);
 
   void notifyUnblocked();
 
   List<byte[]> wait(byte[][] objectIds, int timeoutMs, int numReturns);
 
   boolean subscribeQueue(UniqueID objectId);
-
-  default void fetch(UniqueID objectId) {
-    reconstructObject(objectId);
-  }
-
-  default void fetch(List<UniqueID> objectIds) {
-    for (UniqueID objectId : objectIds) {
-      reconstructObject(objectId);
-    }
-  }
 }
