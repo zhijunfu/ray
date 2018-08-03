@@ -44,16 +44,14 @@ public class StateStoreProxyImpl implements StateStoreProxy {
       throw new Exception(es);
     }
     List<String> ipAddressPorts = rayKvStore.lrange("RedisShards", 0, -1);
-    Set<String> distinctIpAddress = new HashSet<String>();
-    distinctIpAddress.addAll(ipAddressPorts);
-    if (distinctIpAddress.size() != numRedisShards) {
-      es = String.format("Expected %d Redis shard addresses, found2 %d.", numRedisShards,
-        distinctIpAddress.size());
+    if (ipAddressPorts.size() != numRedisShards) {
+      es = String.format("Expected %d Redis shard addresses, found %d.", numRedisShards,
+          ipAddressPorts.size());
       throw new Exception(es);
     }
 
     shardStoreList.clear();
-    for (String ipPort : distinctIpAddress) {
+    for (String ipPort : ipAddressPorts) {
       shardStoreList.add(new RedisClient(ipPort));
     }
 
@@ -75,13 +73,11 @@ public class StateStoreProxyImpl implements StateStoreProxy {
 
   }
 
-  public List<AddressInfo> getAddressInfo(final String nodeIpAddress,
-                                          final String redisAddress, 
-                                          int numRetries) {
+  public List<AddressInfo> getAddressInfo(final String nodeIpAddress, int numRetries) {
     int count = 0;
     while (count < numRetries) {
       try {
-        return getAddressInfoHelper(nodeIpAddress, redisAddress);
+        return getAddressInfoHelper(nodeIpAddress);
       } catch (Exception e) {
         try {
           RayLog.core.warn("Error occurred in StateStoreProxyImpl getAddressInfo, " 
@@ -112,8 +108,7 @@ public class StateStoreProxyImpl implements StateStoreProxy {
    *        "manager_socket_name"(op)
    *        "local_scheduler_socket_name"(op)
    */
-  public List<AddressInfo> getAddressInfoHelper(final String nodeIpAddress, 
-      final String redisAddress) throws Exception {
+  public List<AddressInfo> getAddressInfoHelper(final String nodeIpAddress) throws Exception {
     if (this.rayKvStore == null) {
       throw new Exception("no redis client when use getAddressInfoHelper");
     }
@@ -193,11 +188,11 @@ public class StateStoreProxyImpl implements StateStoreProxy {
     return schedulerInfo;
   }
 
-  protected String charsetDecode(byte[] bs, String charset) throws UnsupportedEncodingException {
+  private String charsetDecode(byte[] bs, String charset) throws UnsupportedEncodingException {
     return new String(bs, charset);
   }
 
-  protected byte[] charsetEncode(String str, String charset) throws UnsupportedEncodingException {
+  private byte[] charsetEncode(String str, String charset) throws UnsupportedEncodingException {
     if (str != null) {
       return str.getBytes(charset);
     }

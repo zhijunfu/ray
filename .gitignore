@@ -150,13 +150,6 @@ build
 .vscode/
 
 *.iml
-
-# Java
 java/**/target
 java/run
 java/**/lib
-java/**/.settings
-java/**/.classpath
-java/**/.project
-java/**/bin
-java/**/*.class

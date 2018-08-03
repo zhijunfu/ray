@@ -42,14 +42,14 @@ Java_org_ray_spi_impl_DefaultLocalSchedulerClient__1init(JNIEnv *env,
                                                          jbyteArray wid,
                                                          jbyteArray actorId,
                                                          jboolean isWorker,
-                                                         jlong numGpus,
-                                                         jboolean useRaylet) {
+                                                         jlong numGpus) {
   // 	native private static long _init(String localSchedulerSocket,
   //     byte[] workerId, byte[] actorId, boolean isWorker, long numGpus);
   UniqueIdFromJByteArray worker_id(env, wid);
   const char *nativeString = env->GetStringUTFChars(sockName, JNI_FALSE);
+  bool use_raylet = false;
   auto client = LocalSchedulerConnection_init(nativeString, *worker_id.PID,
-                                              isWorker, useRaylet, WorkerType::Java);
+                                              isWorker, use_raylet);
   env->ReleaseStringUTFChars(sockName, nativeString);
   return reinterpret_cast<jlong>(client);
 }
@@ -67,29 +67,21 @@ Java_org_ray_spi_impl_DefaultLocalSchedulerClient__1submitTask(
     jbyteArray cursorId,
     jobject buff,
     jint pos,
-    jint sz,
-    jboolean useRaylet) {
+    jint sz) {
   // task -> TaskInfo (with FlatBuffer)
   // native private static void _submitTask(long client, /*Direct*/ByteBuffer
   // task);
   auto client = reinterpret_cast<LocalSchedulerConnection *>(c);
-  
+  TaskSpec *task =
+      reinterpret_cast<char *>(env->GetDirectBufferAddress(buff)) + pos;
   std::vector<ObjectID> execution_dependencies;
   if (cursorId != nullptr) {
     UniqueIdFromJByteArray cursor_id(env, cursorId);
     execution_dependencies.push_back(*cursor_id.PID);
   }
-  if (!useRaylet) {
-    TaskSpec *task =
-        reinterpret_cast<char *>(env->GetDirectBufferAddress(buff)) + pos;
-    TaskExecutionSpec taskExecutionSpec =
-        TaskExecutionSpec(execution_dependencies, task, sz);
-    local_scheduler_submit(client, taskExecutionSpec);
-  } else {
-    auto data = reinterpret_cast<uint8_t *>(env->GetDirectBufferAddress(buff)) + pos;
-    ray::raylet::TaskSpecification task_spec(data, sz);
-    local_scheduler_submit_raylet(client, execution_dependencies, task_spec);
-  }
+  TaskExecutionSpec taskExecutionSpec =
+      TaskExecutionSpec(execution_dependencies, task, sz);
+  local_scheduler_submit(client, taskExecutionSpec);
 }
 
 /*
@@ -100,15 +92,13 @@ Java_org_ray_spi_impl_DefaultLocalSchedulerClient__1submitTask(
 JNIEXPORT jbyteArray JNICALL
 Java_org_ray_spi_impl_DefaultLocalSchedulerClient__1getTaskTodo(JNIEnv *env,
                                                                 jclass,
-                                                                jlong c,
-                                                                jboolean useRaylet) {
+                                                                jlong c) {
   // native private static ByteBuffer _getTaskTodo(long client);
   auto client = reinterpret_cast<LocalSchedulerConnection *>(c);
   int64_t task_size = 0;
 
   // TODO: handle actor failure later
-  TaskSpec *spec = !useRaylet ? local_scheduler_get_task(client, &task_size)
-                              : local_scheduler_get_task_raylet(client, &task_size);
+  TaskSpec *spec = local_scheduler_get_task(client, &task_size);
 
   jbyteArray result;
   result = env->NewByteArray(task_size);

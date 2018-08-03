@@ -19,8 +19,7 @@ Java_org_ray_spi_impl_DefaultLocalSchedulerClient__1init(JNIEnv *,
                                                          jbyteArray,
                                                          jbyteArray,
                                                          jboolean,
-                                                         jlong,
-                                                         jboolean);
+                                                         jlong);
 
 /*
  * Class:     org_ray_spi_impl_DefaultLocalSchedulerClient
@@ -34,8 +33,7 @@ Java_org_ray_spi_impl_DefaultLocalSchedulerClient__1submitTask(JNIEnv *,
                                                                jbyteArray,
                                                                jobject,
                                                                jint,
-                                                               jint,
-                                                               jboolean);
+                                                               jint);
 
 /*
  * Class:     org_ray_spi_impl_DefaultLocalSchedulerClient
@@ -45,8 +43,7 @@ Java_org_ray_spi_impl_DefaultLocalSchedulerClient__1submitTask(JNIEnv *,
 JNIEXPORT jbyteArray JNICALL
 Java_org_ray_spi_impl_DefaultLocalSchedulerClient__1getTaskTodo(JNIEnv *,
                                                                 jclass,
-                                                                jlong,
-                                                                jboolean);
+                                                                jlong);
 
 /*
  * Class:     org_ray_spi_impl_DefaultLocalSchedulerClient
@@ -115,7 +112,6 @@ Java_org_ray_spi_impl_DefaultLocalSchedulerClient__1put_1object(JNIEnv *,
                                                                 jbyteArray);
 
 
-                             
 /*
  * Class:     org_ray_spi_impl_DefaultLocalSchedulerClient
  * Method:    _waitObject

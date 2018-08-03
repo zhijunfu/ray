@@ -90,15 +90,12 @@ void WorkerPool::StartWorkerProcess(bool force_start) {
 void WorkerPool::RegisterWorker(std::shared_ptr<Worker> worker) {
   auto pid = worker->Pid();
   RAY_LOG(DEBUG) << "Registering worker with pid " << pid;
-  bool isJavaWorker = worker->IsJavaWorker();
   registered_workers_.push_back(std::move(worker));
-  if (!isJavaWorker) {
-    auto it = starting_worker_processes_.find(pid);
-    RAY_CHECK(it != starting_worker_processes_.end());
-    it->second--;
-    if (it->second == 0) {
-      starting_worker_processes_.erase(it);
-    }
+  auto it = starting_worker_processes_.find(pid);
+  RAY_CHECK(it != starting_worker_processes_.end());
+  it->second--;
+  if (it->second == 0) {
+    starting_worker_processes_.erase(it);
   }
 }
 
